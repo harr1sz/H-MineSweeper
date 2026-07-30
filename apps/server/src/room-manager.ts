@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import type { ServerConfig } from "./config.js";
 import { RoomActor } from "./room-actor.js";
+import { CapacityError } from "./stores.js";
 import type { GuestSession, ReplayDocument } from "./types.js";
 
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -30,8 +31,15 @@ export class RoomManager {
     private readonly now: () => number = Date.now,
   ) {}
 
+  get size(): number {
+    return this.#byId.size;
+  }
+
   create(host: GuestSession): RoomActor {
-    this.purgeIdleRooms();
+    this.sweepIdleRooms();
+    if (this.#byId.size >= this.config.maxRooms) {
+      throw new CapacityError("rooms");
+    }
     let code = roomCode();
     while (this.#byCode.has(code)) code = roomCode();
     const room = new RoomActor({
@@ -44,6 +52,8 @@ export class RoomManager {
         terminalWindowMs: this.config.terminalWindowMs,
         progressIntervalMs: this.config.progressIntervalMs,
       },
+      maxReplayEvents: this.config.maxReplayEvents,
+      maxReplayBytes: this.config.maxReplayBytes,
       now: this.now,
     });
     this.#byId.set(room.roomId, room);
@@ -52,7 +62,7 @@ export class RoomManager {
   }
 
   join(code: string, guest: GuestSession): JoinRoomResult {
-    this.purgeIdleRooms();
+    this.sweepIdleRooms();
     const room = this.#byCode.get(code.toUpperCase());
     if (!room) return { ok: false, reason: "ROOM_NOT_FOUND" };
     if (room.hasPlayer(guest.guestId)) {
@@ -64,12 +74,12 @@ export class RoomManager {
   }
 
   getById(roomId: string): RoomActor | undefined {
-    this.purgeIdleRooms();
+    this.sweepIdleRooms();
     return this.#byId.get(roomId);
   }
 
   getReplay(replayId: string): ReplayDocument | undefined {
-    this.purgeIdleRooms();
+    this.sweepIdleRooms();
     for (const room of this.#byId.values()) {
       const replay = room.getReplay(replayId);
       if (replay) return replay;
@@ -83,7 +93,7 @@ export class RoomManager {
     this.#byCode.clear();
   }
 
-  private purgeIdleRooms(): void {
+  sweepIdleRooms(): void {
     const now = this.now();
     for (const [roomId, room] of this.#byId) {
       const activity = room.getActivitySnapshot();

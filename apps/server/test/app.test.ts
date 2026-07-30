@@ -12,6 +12,7 @@ function testApp(): FastifyInstance {
     config: {
       ...base,
       allowedOrigins: new Set(["http://127.0.0.1:5173"]),
+      duelExperimentEnabled: true,
     },
   });
   openApps.push(app);
@@ -37,6 +38,55 @@ async function guest(app: FastifyInstance, displayName: string) {
 }
 
 describe("phase-0 REST API", () => {
+  it("keeps every duel transport surface closed when the experiment is off", async () => {
+    const app = createApp({
+      logger: false,
+      config: {
+        ...loadConfig({}),
+        duelExperimentEnabled: false,
+        telemetryPseudonymizationSecret:
+          "test-secret-that-is-long-enough-for-hmac",
+      },
+    });
+    openApps.push(app);
+
+    const guestResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/guest-session",
+      payload: { displayName: "Hidden Duel" },
+    });
+    expect(guestResponse.statusCode).toBe(404);
+    expect(guestResponse.json()).toMatchObject({
+      error: "DUEL_EXPERIMENT_DISABLED",
+      retryable: false,
+    });
+
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toMatchObject({
+      status: "ready",
+      capacity: {
+        acceptingNewGuestSessions: false,
+        acceptingNewRooms: false,
+        acceptingTelemetry: true,
+      },
+    });
+    const version = await app.inject({ method: "GET", url: "/version" });
+    expect(version.statusCode).toBe(200);
+    expect(version.json()).toMatchObject({
+      duelExperimentEnabled: false,
+    });
+  });
+
+  it("reports the effective enabled duel flag in version metadata", async () => {
+    const app = testApp();
+    const version = await app.inject({ method: "GET", url: "/version" });
+    expect(version.statusCode).toBe(200);
+    expect(version.json()).toMatchObject({
+      duelExperimentEnabled: true,
+    });
+  });
+
   it("creates a strict two-player room and joins it by code", async () => {
     const app = testApp();
     const host = await guest(app, "Host");

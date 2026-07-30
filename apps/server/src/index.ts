@@ -4,7 +4,21 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 
 export { createApp, getServerServices } from "./app.js";
+export {
+  PUBLIC_TELEMETRY_BATCH_ID,
+  PUBLIC_TELEMETRY_COHORT_SEGMENT,
+  SERVER_SCHEMA_VERSION,
+  SqliteTelemetryStore,
+  sanitizeTelemetryProperties,
+} from "./telemetry-store.js";
+export type {
+  TelemetryEventV1,
+  TelemetrySession,
+  TelemetryStore,
+  TelemetryStoreStatus,
+} from "./telemetry-store.js";
 export { loadConfig } from "./config.js";
+export { RestRateLimiter } from "./rest-rate-limiter.js";
 export { RoomActor } from "./room-actor.js";
 export { RoomManager } from "./room-manager.js";
 export { GuestSessionStore, TicketStore } from "./stores.js";

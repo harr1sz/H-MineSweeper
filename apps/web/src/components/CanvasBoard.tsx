@@ -73,8 +73,10 @@ const REVEALED = 1;
 const FLAGGED = 2;
 const MIN_CELL_SIZE = 18;
 const MAX_CELL_SIZE = 30;
-const COARSE_MIN_CELL_SIZE = 44;
 const COARSE_MAX_CELL_SIZE = 52;
+const COARSE_PANNABLE_CELL_SIZE = 32;
+const COARSE_ZOOM_MIN_CELL_SIZE = 24;
+const ZOOM_STEP = 4;
 const DIRTY_REDRAW_THRESHOLD = 0.15;
 const MAX_ANIMATED_CELLS = 64;
 const MAX_CANVAS_LAYER_PIXELS = 4_000_000;
@@ -198,6 +200,59 @@ export function resolveBoardMarkMetrics(cellSize: number): BoardMarkMetrics {
     iconSize: Math.max(14, safeCellSize * 0.74),
     iconLineWidth: Math.max(1.5, safeCellSize * 0.075),
   };
+}
+
+export function resolveBoardAvailableWidth(
+  clientWidth: number,
+  paddingLeft: number,
+  paddingRight: number,
+): number {
+  const safeClientWidth = Number.isFinite(clientWidth)
+    ? Math.max(1, clientWidth)
+    : 1;
+  const safePaddingLeft = Number.isFinite(paddingLeft)
+    ? Math.max(0, paddingLeft)
+    : 0;
+  const safePaddingRight = Number.isFinite(paddingRight)
+    ? Math.max(0, paddingRight)
+    : 0;
+  return Math.max(
+    1,
+    Math.floor(safeClientWidth - safePaddingLeft - safePaddingRight - 2),
+  );
+}
+
+export function resolveResponsiveCellSize(
+  availableWidth: number,
+  columns: number,
+  coarsePointer: boolean,
+): number {
+  const safeAvailableWidth = Number.isFinite(availableWidth)
+    ? Math.max(1, Math.floor(availableWidth))
+    : 1;
+  const safeColumns = Number.isFinite(columns)
+    ? Math.max(1, Math.floor(columns))
+    : 1;
+  const fittedSize = Math.floor(safeAvailableWidth / safeColumns);
+
+  if (!coarsePointer) {
+    return clamp(fittedSize, MIN_CELL_SIZE, MAX_CELL_SIZE);
+  }
+
+  // Beginner boards must fit narrow phones end-to-end. Larger boards keep a
+  // usable target size and deliberately pan inside the board viewport.
+  if (safeColumns <= 9) {
+    return clamp(
+      fittedSize,
+      COARSE_ZOOM_MIN_CELL_SIZE,
+      COARSE_MAX_CELL_SIZE,
+    );
+  }
+  return clamp(
+    fittedSize,
+    COARSE_PANNABLE_CELL_SIZE,
+    COARSE_MAX_CELL_SIZE,
+  );
 }
 
 export function normalizeChangedIndexes(
@@ -447,7 +502,8 @@ export function CanvasBoard({
   const previousPressedRef = useRef<number | null>(null);
   const previousOutcomeRef = useRef<GameState["outcome"] | null>(null);
   const previousThemeRef = useRef<BoardTheme | null>(null);
-  const [cellSize, setCellSize] = useState(24);
+  const [baseCellSize, setBaseCellSize] = useState(24);
+  const [zoomOffset, setZoomOffset] = useState(0);
   const [coarsePointer] = useState(
     () =>
       window.matchMedia("(pointer: coarse)").matches ||
@@ -463,6 +519,11 @@ export function CanvasBoard({
   const width = dimensions?.width ?? 30;
   const height = dimensions?.height ?? 16;
   const cellCount = width * height;
+  const cellSize = clamp(
+    baseCellSize + zoomOffset,
+    coarsePointer ? COARSE_ZOOM_MIN_CELL_SIZE : MIN_CELL_SIZE,
+    coarsePointer ? COARSE_MAX_CELL_SIZE : MAX_CELL_SIZE,
+  );
   const palette = resolveBoardPalette(boardTheme);
   const effectiveEffectsProfile = reducedMotion ? "essential" : effectsProfile;
 
@@ -471,13 +532,14 @@ export function CanvasBoard({
     if (!wrapper) return;
 
     const updateSize = () => {
-      const available = Math.max(320, wrapper.clientWidth - 2);
-      setCellSize(
-        clamp(
-          Math.floor(available / width),
-          coarsePointer ? COARSE_MIN_CELL_SIZE : MIN_CELL_SIZE,
-          coarsePointer ? COARSE_MAX_CELL_SIZE : MAX_CELL_SIZE,
-        ),
+      const computedStyle = window.getComputedStyle(wrapper);
+      const available = resolveBoardAvailableWidth(
+        wrapper.clientWidth,
+        Number.parseFloat(computedStyle.paddingLeft),
+        Number.parseFloat(computedStyle.paddingRight),
+      );
+      setBaseCellSize(
+        resolveResponsiveCellSize(available, width, coarsePointer),
       );
     };
 
@@ -497,7 +559,34 @@ export function CanvasBoard({
     previousFocusRef.current = null;
     previousPressedRef.current = null;
     previousOutcomeRef.current = null;
+    setZoomOffset(0);
   }, [height, width]);
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    const canvas = canvasRef.current;
+    if (!wrapper || !canvas || width <= 0 || height <= 0) return;
+
+    const x = focusIndex % width;
+    const y = Math.floor(focusIndex / width);
+    const cellLeft = canvas.offsetLeft + x * cellSize;
+    const cellTop = canvas.offsetTop + y * cellSize;
+    const cellRight = cellLeft + cellSize;
+    const cellBottom = cellTop + cellSize;
+    const viewportRight = wrapper.scrollLeft + wrapper.clientWidth;
+    const viewportBottom = wrapper.scrollTop + wrapper.clientHeight;
+
+    if (cellLeft < wrapper.scrollLeft) {
+      wrapper.scrollLeft = Math.max(0, cellLeft - cellSize);
+    } else if (cellRight > viewportRight) {
+      wrapper.scrollLeft = cellRight - wrapper.clientWidth + cellSize;
+    }
+    if (cellTop < wrapper.scrollTop) {
+      wrapper.scrollTop = Math.max(0, cellTop - cellSize);
+    } else if (cellBottom > viewportBottom) {
+      wrapper.scrollTop = cellBottom - wrapper.clientHeight + cellSize;
+    }
+  }, [cellSize, focusIndex, height, width]);
 
   useEffect(() => {
     if (
@@ -1167,72 +1256,126 @@ export function CanvasBoard({
     }
   };
 
+  const focusedCellLabel = (() => {
+    const row = Math.floor(focusIndex / width) + 1;
+    const column = (focusIndex % width) + 1;
+    if (!game) return `第 ${row} 行，第 ${column} 列，未开始`;
+    const visibility = game.visibility[focusIndex] ?? HIDDEN;
+    if (visibility === FLAGGED) {
+      return `第 ${row} 行，第 ${column} 列，已插旗`;
+    }
+    if (visibility !== REVEALED) {
+      return `第 ${row} 行，第 ${column} 列，未揭开`;
+    }
+    if (game.board.mines[focusIndex] === 1) {
+      return `第 ${row} 行，第 ${column} 列，地雷`;
+    }
+    const adjacent = game.board.adjacent[focusIndex] ?? 0;
+    return adjacent === 0
+      ? `第 ${row} 行，第 ${column} 列，空白`
+      : `第 ${row} 行，第 ${column} 列，数字 ${adjacent}`;
+  })();
+
   return (
-    <div className="board-scroll" ref={wrapperRef}>
-      <div
-        className="board-canvas-stack"
-        style={{
-          width: `${width * cellSize}px`,
-          height: `${height * cellSize}px`,
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          className={`mine-board${disabled ? " is-disabled" : ""}${reducedMotion ? " reduced-motion" : ""}`}
-          role="grid"
-          tabIndex={0}
-          aria-label={`${width} 乘 ${height} 竞技扫雷棋盘。方向键移动，回车揭格，F 插旗，C 和弦。`}
-          onContextMenu={(event) => event.preventDefault()}
-          onKeyDown={handleKeyDown}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={(event) => {
-            setPressedIndex(null);
-            if (event.buttons === 0) {
-              chordTriggeredRef.current = false;
-            }
+    <div className="board-viewport">
+      <div className="board-zoom-controls" role="group" aria-label="棋盘缩放">
+        <span aria-live="polite">格宽 {cellSize}px</span>
+        <button
+          type="button"
+          onClick={() => setZoomOffset((current) => current - ZOOM_STEP)}
+          disabled={
+            cellSize <=
+            (coarsePointer ? COARSE_ZOOM_MIN_CELL_SIZE : MIN_CELL_SIZE)
+          }
+          aria-label="缩小棋盘"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() => setZoomOffset(0)}
+          disabled={zoomOffset === 0}
+        >
+          重置
+        </button>
+        <button
+          type="button"
+          onClick={() => setZoomOffset((current) => current + ZOOM_STEP)}
+          disabled={
+            cellSize >=
+            (coarsePointer ? COARSE_MAX_CELL_SIZE : MAX_CELL_SIZE)
+          }
+          aria-label="放大棋盘"
+        >
+          +
+        </button>
+      </div>
+      <div className="board-scroll" ref={wrapperRef}>
+        <div
+          className="board-canvas-stack"
+          style={{
+            width: `${width * cellSize}px`,
+            height: `${height * cellSize}px`,
           }}
-          onMouseUp={handleMouseUp}
-          onPointerCancel={(event) => {
-            clearLongPress();
-            activeTouchPointersRef.current.delete(event.pointerId);
-            if (touchGestureRef.current?.pointerId === event.pointerId) {
-              touchGestureRef.current = null;
-            }
-            if (activeTouchPointersRef.current.size === 0) {
-              pinchGestureRef.current = false;
-            }
-            chordTriggeredRef.current = false;
-            setPressedIndex(null);
-          }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={(event) => {
-            const gesture = touchGestureRef.current;
-            if (
-              event.pointerType !== "touch" ||
-              gesture === null ||
-              gesture.pointerId !== event.pointerId ||
-              gesture.moved
-            ) {
-              return;
-            }
-            if (
-              Math.hypot(
-                event.clientX - gesture.startX,
-                event.clientY - gesture.startY,
-              ) > 8
-            ) {
-              gesture.moved = true;
-              clearLongPress();
+        >
+          <canvas
+            ref={canvasRef}
+            className={`mine-board${disabled ? " is-disabled" : ""}${reducedMotion ? " reduced-motion" : ""}`}
+            role="grid"
+            tabIndex={0}
+            aria-label={`${width} 乘 ${height} 扫雷棋盘。${focusedCellLabel}。方向键移动，回车揭格，F 插旗，C 和弦。`}
+            onContextMenu={(event) => event.preventDefault()}
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleMouseDown}
+            onMouseLeave={(event) => {
               setPressedIndex(null);
-            }
-          }}
-          onPointerUp={handlePointerUp}
-        />
-        <canvas
-          ref={overlayCanvasRef}
-          aria-hidden="true"
-          className="board-effects-canvas"
-        />
+              if (event.buttons === 0) {
+                chordTriggeredRef.current = false;
+              }
+            }}
+            onMouseUp={handleMouseUp}
+            onPointerCancel={(event) => {
+              clearLongPress();
+              activeTouchPointersRef.current.delete(event.pointerId);
+              if (touchGestureRef.current?.pointerId === event.pointerId) {
+                touchGestureRef.current = null;
+              }
+              if (activeTouchPointersRef.current.size === 0) {
+                pinchGestureRef.current = false;
+              }
+              chordTriggeredRef.current = false;
+              setPressedIndex(null);
+            }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={(event) => {
+              const gesture = touchGestureRef.current;
+              if (
+                event.pointerType !== "touch" ||
+                gesture === null ||
+                gesture.pointerId !== event.pointerId ||
+                gesture.moved
+              ) {
+                return;
+              }
+              if (
+                Math.hypot(
+                  event.clientX - gesture.startX,
+                  event.clientY - gesture.startY,
+                ) > 8
+              ) {
+                gesture.moved = true;
+                clearLongPress();
+                setPressedIndex(null);
+              }
+            }}
+            onPointerUp={handlePointerUp}
+          />
+          <canvas
+            ref={overlayCanvasRef}
+            aria-hidden="true"
+            className="board-effects-canvas"
+          />
+        </div>
       </div>
     </div>
   );

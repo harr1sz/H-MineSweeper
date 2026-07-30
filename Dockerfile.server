@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1.7
+
+ARG NODE_IMAGE=node:22.13.1-bookworm-slim
+
+FROM ${NODE_IMAGE} AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
+
+WORKDIR /workspace
+
+RUN corepack enable \
+  && corepack prepare pnpm@11.9.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/server/package.json apps/server/package.json
+COPY packages/game-core/package.json packages/game-core/package.json
+
+RUN --mount=type=cache,id=hms-pnpm-store,target=/pnpm/store \
+  pnpm install --frozen-lockfile
+
+COPY apps/server apps/server
+COPY packages/game-core packages/game-core
+
+RUN pnpm --filter @h-minesweeper/server build \
+  && pnpm --filter @h-minesweeper/server deploy \
+    --prod \
+    --legacy \
+    /opt/h-minesweeper-server
+
+FROM ${NODE_IMAGE} AS runtime
+
+ARG APP_VERSION=0.2.0-alpha.1
+ARG BUILD_SHA=development
+ARG REGION=local
+
+LABEL org.opencontainers.image.title="H-MineSweeper Alpha server" \
+  org.opencontainers.image.version="${APP_VERSION}" \
+  org.opencontainers.image.revision="${BUILD_SHA}" \
+  io.h-minesweeper.region="${REGION}" \
+  org.opencontainers.image.description="Single-region public-access Alpha API and realtime server"
+
+ENV NODE_ENV=production \
+  H_MINESWEEPER_HOST=0.0.0.0 \
+  H_MINESWEEPER_PORT=3001 \
+  H_MINESWEEPER_APP_VERSION="${APP_VERSION}" \
+  H_MINESWEEPER_BUILD_SHA="${BUILD_SHA}" \
+  H_MINESWEEPER_REGION="${REGION}"
+
+WORKDIR /app
+
+COPY --from=build --chown=node:node \
+  /opt/h-minesweeper-server/node_modules ./node_modules
+COPY --from=build --chown=node:node \
+  /workspace/apps/server/package.json ./package.json
+COPY --from=build --chown=node:node \
+  /workspace/apps/server/dist ./dist
+
+RUN mkdir -p /data /run/h-minesweeper \
+  && chown node:node /data /run/h-minesweeper
+
+USER node
+
+EXPOSE 3001
+STOPSIGNAL SIGTERM
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=4 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+CMD ["node", "dist/index.js"]

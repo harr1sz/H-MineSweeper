@@ -19,6 +19,19 @@ function testConfig(roomIdleTtlMs: number) {
 }
 
 describe("RoomManager idle cleanup", () => {
+  it("enforces the configured room capacity", () => {
+    const manager = new RoomManager({
+      ...testConfig(60_000),
+      maxRooms: 1,
+    });
+    manager.create(guest("first"));
+
+    expect(() => manager.create(guest("second"))).toThrow(
+      "rooms capacity has been reached",
+    );
+    manager.close();
+  });
+
   it("closes and removes a fully offline room after the idle TTL", () => {
     let now = 1_000;
     const manager = new RoomManager(testConfig(5_000), () => now);
@@ -75,6 +88,20 @@ describe("RoomManager idle cleanup", () => {
 
     now += 1;
     expect(manager.getById(room.roomId)).toBeUndefined();
+    expect(close).toHaveBeenCalledOnce();
+    manager.close();
+  });
+
+  it("supports timer-driven sweeping without a follow-up room request", () => {
+    let now = 40_000;
+    const manager = new RoomManager(testConfig(1_000), () => now);
+    const room = manager.create(guest("timer-sweep"));
+    const close = vi.spyOn(room, "close");
+
+    now += 1_000;
+    manager.sweepIdleRooms();
+
+    expect(manager.size).toBe(0);
     expect(close).toHaveBeenCalledOnce();
     manager.close();
   });

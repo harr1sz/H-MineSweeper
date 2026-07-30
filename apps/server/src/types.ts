@@ -45,7 +45,7 @@ export interface ReplayDocument {
   readonly roomCode: string;
   readonly createdAt: number;
   finishedAt?: number;
-  status: "ACTIVE" | "COMPLETED";
+  status: "ACTIVE" | "COMPLETED" | "UNAVAILABLE";
   result?: unknown;
   players: ReadonlyArray<{
     readonly guestId: string;

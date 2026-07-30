@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { GuestSessionStore, TicketStore } from "../src/stores.js";
 
 describe("GuestSessionStore", () => {
+  it("enforces capacity after removing expired sessions", () => {
+    let now = 1_000;
+    const store = new GuestSessionStore(1_000, () => now, 1);
+    store.create("First");
+    expect(() => store.create("Second")).toThrow(
+      "guest_sessions capacity has been reached",
+    );
+
+    now += 1_000;
+    expect(store.create("Second").displayName).toBe("Second");
+  });
+
   it("expires sessions and purges stale entries on get and create", () => {
     let now = 1_000;
     const store = new GuestSessionStore(5_000, () => now);
