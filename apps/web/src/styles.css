@@ -1271,6 +1271,15 @@ input:focus {
   cursor: pointer;
 }
 
+.solo-config-lock-note {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--gold);
+  background: rgb(228 184 91 / 7%);
+  color: var(--muted);
+  font: 650 11px/1.6 var(--mono);
+}
+
 .button-link {
   min-width: 170px;
 }

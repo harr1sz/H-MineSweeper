@@ -1170,6 +1170,8 @@ export function SoloGame({
           : status === "WON"
             ? "已完成"
             : "已触雷";
+  const configurationLocked =
+    status === "PLAYING" || status === "GENERATING";
 
   return (
     <section className="solo-shell">
@@ -1197,7 +1199,16 @@ export function SoloGame({
         </button>
       </div>
 
-      <div className="solo-config" aria-label="单人棋盘设置">
+      <div
+        className="solo-config"
+        aria-label="单人棋盘设置"
+        aria-disabled={configurationLocked}
+      >
+        {configurationLocked && (
+          <p className="solo-config-lock-note" role="status">
+            本局进行中，难度与生成规则已锁定；如需切换，请先选择“放弃并换一张”。
+          </p>
+        )}
         <div className="solo-config-group">
           <span className="meta-label">难度</span>
           <div className="solo-tabs">
@@ -1207,6 +1218,7 @@ export function SoloGame({
                   className={`solo-tab${preset === key ? " is-active" : ""}`}
                   key={key}
                   type="button"
+                  disabled={configurationLocked}
                   onClick={() => choosePreset(key)}
                 >
                   {PRESET_LABELS[key]}
@@ -1220,6 +1232,7 @@ export function SoloGame({
             <button
               className={`solo-tab${preset === "custom" ? " is-active" : ""}`}
               type="button"
+              disabled={configurationLocked}
               onClick={applyCustom}
             >
               自定义
@@ -1234,6 +1247,7 @@ export function SoloGame({
             <button
               className={`solo-mode${mode === "classic" ? " is-active" : ""}`}
               type="button"
+              disabled={configurationLocked}
               onClick={() => chooseMode("classic")}
             >
               经典随机
@@ -1241,6 +1255,7 @@ export function SoloGame({
             <button
               className={`solo-mode${mode === "no_guess" ? " is-active" : ""}`}
               type="button"
+              disabled={configurationLocked}
               onClick={() => chooseMode("no_guess")}
             >
               无猜模式
@@ -1257,6 +1272,7 @@ export function SoloGame({
               max="100"
               min="5"
               type="number"
+              disabled={configurationLocked}
               value={draftWidth}
               onChange={(event) => setDraftWidth(event.target.value)}
             />
@@ -1269,6 +1285,7 @@ export function SoloGame({
               max="100"
               min="5"
               type="number"
+              disabled={configurationLocked}
               value={draftHeight}
               onChange={(event) => setDraftHeight(event.target.value)}
             />
@@ -1280,11 +1297,17 @@ export function SoloGame({
               inputMode="numeric"
               min="1"
               type="number"
+              disabled={configurationLocked}
               value={draftMines}
               onChange={(event) => setDraftMines(event.target.value)}
             />
           </label>
-          <button className="secondary-button" type="button" onClick={applyCustom}>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={configurationLocked}
+            onClick={applyCustom}
+          >
             应用自定义
           </button>
         </div>
