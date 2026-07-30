@@ -344,6 +344,7 @@ export function SoloGame({
   const workerRef = useRef<Worker | null>(null);
   const workerTimeoutRef = useRef<number | null>(null);
   const workerRequestRef = useRef(0);
+  const generationActiveRef = useRef(false);
   const visualSequenceRef = useRef(0);
   const lastComboAtRef = useRef<number | null>(null);
   const comboTimeoutRef = useRef<number | null>(null);
@@ -441,6 +442,7 @@ export function SoloGame({
   }, []);
 
   const cancelGeneration = useCallback(() => {
+    generationActiveRef.current = false;
     workerRequestRef.current += 1;
     workerRef.current?.terminate();
     workerRef.current = null;
@@ -691,7 +693,9 @@ export function SoloGame({
       flaggedIndexes: readonly number[],
       physicalClicks: number,
     ) => {
+      if (generationActiveRef.current) return;
       cancelGeneration();
+      generationActiveRef.current = true;
       const requestId = workerRequestRef.current;
       const generationStartedAt = performance.now();
       setStatus("GENERATING");
@@ -704,6 +708,7 @@ export function SoloGame({
           { type: "module" },
         );
       } catch {
+        generationActiveRef.current = false;
         setStatus("READY");
         setNotice("无猜生成器无法启动，请检查浏览器安全策略或改用经典随机。");
         track("no_guess_generation_finished", {
@@ -728,6 +733,7 @@ export function SoloGame({
         if (requestId !== workerRequestRef.current) return;
         worker.terminate();
         workerRef.current = null;
+        generationActiveRef.current = false;
         if (workerTimeoutRef.current !== null) {
           window.clearTimeout(workerTimeoutRef.current);
           workerTimeoutRef.current = null;
@@ -752,6 +758,7 @@ export function SoloGame({
         }
         worker.terminate();
         workerRef.current = null;
+        generationActiveRef.current = false;
         if (workerTimeoutRef.current !== null) {
           window.clearTimeout(workerTimeoutRef.current);
           workerTimeoutRef.current = null;
@@ -801,7 +808,14 @@ export function SoloGame({
           "TIME_LIMIT",
         );
       }, 5_000);
-      worker.postMessage(request);
+      try {
+        worker.postMessage(request);
+      } catch {
+        fail(
+          "无猜生成器无法接收任务，请改用经典随机后重试。",
+          "GENERATION_ERROR",
+        );
+      }
     },
     [beginGame, cancelGeneration, config, preset, track],
   );
