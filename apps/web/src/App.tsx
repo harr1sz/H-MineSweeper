@@ -1064,7 +1064,6 @@ export function App() {
   };
 
   const chooseHomeMode = (nextMode: HomeMode) => {
-    if (nextMode === "duel" && !DUEL_EXPERIMENT_ENABLED) return;
     if (nextMode === homeMode) return;
     setHomeMode(nextMode);
     track("mode_selected", {
@@ -1190,7 +1189,7 @@ export function App() {
             className={`home-grid home-mode-${homeMode}${DUEL_EXPERIMENT_ENABLED ? "" : " duel-experiment-disabled"}`}
           >
             <div
-              className={`duel-hero-visual${DUEL_EXPERIMENT_ENABLED && homeMode === "duel" ? " is-active" : ""}`}
+              className={`duel-hero-visual${homeMode === "duel" ? " is-active" : ""}`}
               aria-hidden="true"
             >
               <img
@@ -1299,19 +1298,17 @@ export function App() {
                   <strong>扫雷学院</strong>
                   <small>LEARN</small>
                 </button>
-                {DUEL_EXPERIMENT_ENABLED && (
-                  <button
-                    className="home-mode-option"
-                    type="button"
-                    aria-pressed={homeMode === "duel"}
-                    disabled={busy}
-                    onClick={() => chooseHomeMode("duel")}
-                  >
-                    <span>03</span>
-                    <strong>1v1 实验</strong>
-                    <small>FEATURE FLAG</small>
-                  </button>
-                )}
+                <button
+                  className="home-mode-option"
+                  type="button"
+                  aria-pressed={homeMode === "duel"}
+                  disabled={busy}
+                  onClick={() => chooseHomeMode("duel")}
+                >
+                  <span>03</span>
+                  <strong>1v1 对战</strong>
+                  <small>{DUEL_EXPERIMENT_ENABLED ? "REALTIME" : "PAUSED"}</small>
+                </button>
               </div>
 
               <div
@@ -1352,6 +1349,20 @@ export function App() {
                       <span>无需注册即可学习</span>
                       <span>Proof 驱动提示</span>
                       <span>进度保存在本机</span>
+                    </div>
+                  </>
+                ) : !DUEL_EXPERIMENT_ENABLED ? (
+                  <>
+                    <button className="primary-button" type="button" disabled>
+                      1v1 暂时维护中
+                    </button>
+                    <p className="entry-mode-note">
+                      多人游戏仍是产品的一部分；当前环境已通过独立开关暂停实时服务。
+                    </p>
+                    <div className="entry-feature-list" aria-label="1v1 模式状态">
+                      <span>入口保持可见</span>
+                      <span>单人模式不受影响</span>
+                      <span>服务恢复后即可建房</span>
                     </div>
                   </>
                 ) : (
