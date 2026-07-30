@@ -1173,7 +1173,17 @@ export function SoloGame({
 
   return (
     <section className="solo-shell">
-      <a className="skip-link" href="#solo-board">
+      <a
+        className="skip-link"
+        href="#solo-board"
+        onClick={(event) => {
+          const target = document.getElementById("solo-board");
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+          event.currentTarget.blur();
+        }}
+      >
         跳到棋盘
       </a>
       <div className="solo-header">
