@@ -396,6 +396,7 @@ export function SoloGame({
   const [seed, setSeed] = useState("");
   const [boardHash, setBoardHash] = useState("");
   const [generationSummary, setGenerationSummary] = useState("");
+  const [reviewingTerminalBoard, setReviewingTerminalBoard] = useState(false);
   const [draftWidth, setDraftWidth] = useState(String(initialConfig.width));
   const [draftHeight, setDraftHeight] = useState(String(initialConfig.height));
   const [draftMines, setDraftMines] = useState(String(initialConfig.mines));
@@ -532,6 +533,7 @@ export function SoloGame({
       setSeed("");
       setBoardHash("");
       setGenerationSummary("");
+      setReviewingTerminalBoard(false);
       setNotice(
         nextConfig.mode === "no_guess"
           ? "首击后后台生成可逻辑解出的无猜棋盘，最多尝试 50 次或 5 秒。"
@@ -548,6 +550,7 @@ export function SoloGame({
         return;
       }
       setFinishedAt(completedAt);
+      setReviewingTerminalBoard(false);
       setClockNow(completedAt);
       runCompletedAtRef.current = Date.now();
       lastEffectiveInteractionAtRef.current = null;
@@ -1288,6 +1291,15 @@ export function SoloGame({
             <span>右键 FLAG</span>
             <span>中键 / 左右键 CHORD</span>
             <span>{config.mode === "no_guess" ? "NO-GUESS" : "CLASSIC"}</span>
+            {reviewingTerminalBoard && (
+              <button
+                className="board-toolbar-action"
+                type="button"
+                onClick={() => setReviewingTerminalBoard(false)}
+              >
+                查看结算
+              </button>
+            )}
           </div>
           <CanvasBoard
             {...(actionVisual === undefined ? {} : { actionVisual })}
@@ -1327,7 +1339,8 @@ export function SoloGame({
             </div>
           )}
 
-          {(status === "WON" || status === "LOST") && (
+          {(status === "WON" || status === "LOST") &&
+            !reviewingTerminalBoard && (
             <div
               className="result-overlay"
               role="status"
@@ -1351,6 +1364,13 @@ export function SoloGame({
                 <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
               </div>
               <div className="result-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setReviewingTerminalBoard(true)}
+                >
+                  查看棋盘
+                </button>
                 <button
                   className="primary-button"
                   type="button"
