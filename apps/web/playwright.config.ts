@@ -6,7 +6,7 @@ const baseURL = "http://127.0.0.1:5173";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "solo-baseline.e2e.ts",
+  testMatch: ["solo-baseline.e2e.ts", "*.regression.e2e.ts"],
   outputDir: join(tmpdir(), "h-minesweeper-playwright-results"),
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
