@@ -1,0 +1,23 @@
+{
+  "name": "@h-minesweeper/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@h-minesweeper/game-core": "workspace:*",
+    "@vitejs/plugin-react": "^6.0.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^8.1.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
+  }
+}

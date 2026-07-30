@@ -1,0 +1,1369 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1024"
+  viewBox="0 0 1320 1024" role="img"
+  aria-labelledby="board-title board-description">
+  <title id="board-title">H-MineSweeper verified H board</title>
+  <desc id="board-description">A deterministic Minesweeper board whose twenty-three flagged mines form the letter H. Every visible number equals its adjacent mine count.</desc>
+  <defs>
+    <linearGradient id="boardMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#263140"/>
+      <stop offset="0.38" stop-color="#101923"/>
+      <stop offset="1" stop-color="#070d14"/>
+    </linearGradient>
+    <linearGradient id="openCell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#182536"/>
+      <stop offset="1" stop-color="#0d1722"/>
+    </linearGradient>
+    <linearGradient id="numberCell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2a3c"/>
+      <stop offset="1" stop-color="#101a26"/>
+    </linearGradient>
+    <linearGradient id="mineCell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#282113"/>
+      <stop offset="1" stop-color="#12130f"/>
+    </linearGradient>
+    <linearGradient id="flagGold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe18b"/>
+      <stop offset="0.52" stop-color="#e7aa32"/>
+      <stop offset="1" stop-color="#9e6517"/>
+    </linearGradient>
+    <linearGradient id="rimGold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5d4b2d"/>
+      <stop offset="0.38" stop-color="#e0bd78"/>
+      <stop offset="1" stop-color="#415063"/>
+    </linearGradient>
+    <filter id="boardShadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="34" stdDeviation="28" flood-color="#000713" flood-opacity="0.82"/>
+      <feDropShadow dx="-6" dy="-4" stdDeviation="12" flood-color="#5689c7" flood-opacity="0.11"/>
+    </filter>
+    <filter id="goldGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#e4b85b" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g transform="translate(163 82) rotate(11 497 421) skewX(-4)"
+    filter="url(#boardShadow)">
+    <rect x="-18" y="-18" width="1030" height="878" rx="18"
+      fill="url(#boardMetal)" stroke="url(#rimGold)" stroke-width="5"/>
+    <rect x="-7" y="-7" width="1008" height="856" rx="12"
+      fill="#07101a" stroke="#56708f" stroke-opacity="0.45" stroke-width="2"/>
+
+      <g data-index="0" data-mine="false" data-adjacent="0">
+        <rect x="6" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 11H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="1" data-mine="false" data-adjacent="0">
+        <rect x="82" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 11H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="2" data-mine="false" data-adjacent="1">
+        <rect x="158" y="6" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 11H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="43" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="3" data-mine="false" data-adjacent="1">
+        <rect x="234" y="6" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M238 11H300"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="269" y="43" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="4" data-mine="false" data-adjacent="1">
+        <rect x="310" y="6" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 11H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="43" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="5" data-mine="false" data-adjacent="0">
+        <rect x="386" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 11H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="6" data-mine="false" data-adjacent="0">
+        <rect x="462" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 11H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="7" data-mine="false" data-adjacent="0">
+        <rect x="538" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 11H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="8" data-mine="false" data-adjacent="1">
+        <rect x="614" y="6" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 11H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="43" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="9" data-mine="false" data-adjacent="1">
+        <rect x="690" y="6" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M694 11H756"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="725" y="43" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="10" data-mine="false" data-adjacent="1">
+        <rect x="766" y="6" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 11H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="43" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="11" data-mine="false" data-adjacent="0">
+        <rect x="842" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 11H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="12" data-mine="false" data-adjacent="0">
+        <rect x="918" y="6" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 11H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="41" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="13" data-mine="false" data-adjacent="0">
+        <rect x="6" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 87H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="14" data-mine="false" data-adjacent="0">
+        <rect x="82" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 87H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="15" data-mine="false" data-adjacent="2">
+        <rect x="158" y="82" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 87H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="119" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="16" data-mine="true" data-adjacent="">
+        <rect x="234" y="82" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 87H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 139L271 97"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 97L295 105L275 119Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 141H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="17" data-mine="false" data-adjacent="2">
+        <rect x="310" y="82" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 87H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="119" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="18" data-mine="false" data-adjacent="0">
+        <rect x="386" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 87H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="19" data-mine="false" data-adjacent="0">
+        <rect x="462" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 87H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="20" data-mine="false" data-adjacent="0">
+        <rect x="538" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 87H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="21" data-mine="false" data-adjacent="2">
+        <rect x="614" y="82" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 87H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="119" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="22" data-mine="true" data-adjacent="">
+        <rect x="690" y="82" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 87H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 139L727 97"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 97L751 105L731 119Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 141H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="23" data-mine="false" data-adjacent="2">
+        <rect x="766" y="82" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 87H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="119" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="24" data-mine="false" data-adjacent="0">
+        <rect x="842" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 87H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="25" data-mine="false" data-adjacent="0">
+        <rect x="918" y="82" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 87H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="117" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="26" data-mine="false" data-adjacent="0">
+        <rect x="6" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 163H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="27" data-mine="false" data-adjacent="0">
+        <rect x="82" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 163H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="28" data-mine="false" data-adjacent="3">
+        <rect x="158" y="158" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 163H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="195" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="29" data-mine="true" data-adjacent="">
+        <rect x="234" y="158" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 163H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 215L271 173"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 173L295 181L275 195Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 217H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="30" data-mine="false" data-adjacent="3">
+        <rect x="310" y="158" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 163H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="195" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="31" data-mine="false" data-adjacent="0">
+        <rect x="386" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 163H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="32" data-mine="false" data-adjacent="0">
+        <rect x="462" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 163H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="33" data-mine="false" data-adjacent="0">
+        <rect x="538" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 163H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="34" data-mine="false" data-adjacent="3">
+        <rect x="614" y="158" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 163H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="195" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="35" data-mine="true" data-adjacent="">
+        <rect x="690" y="158" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 163H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 215L727 173"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 173L751 181L731 195Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 217H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="36" data-mine="false" data-adjacent="3">
+        <rect x="766" y="158" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 163H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="195" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="37" data-mine="false" data-adjacent="0">
+        <rect x="842" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 163H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="38" data-mine="false" data-adjacent="0">
+        <rect x="918" y="158" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 163H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="193" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="39" data-mine="false" data-adjacent="0">
+        <rect x="6" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 239H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="40" data-mine="false" data-adjacent="0">
+        <rect x="82" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 239H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="41" data-mine="false" data-adjacent="3">
+        <rect x="158" y="234" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 239H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="271" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="42" data-mine="true" data-adjacent="">
+        <rect x="234" y="234" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 239H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 291L271 249"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 249L295 257L275 271Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 293H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="43" data-mine="false" data-adjacent="3">
+        <rect x="310" y="234" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 239H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="271" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="44" data-mine="false" data-adjacent="0">
+        <rect x="386" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 239H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="45" data-mine="false" data-adjacent="0">
+        <rect x="462" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 239H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="46" data-mine="false" data-adjacent="0">
+        <rect x="538" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 239H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="47" data-mine="false" data-adjacent="3">
+        <rect x="614" y="234" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 239H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="271" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="48" data-mine="true" data-adjacent="">
+        <rect x="690" y="234" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 239H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 291L727 249"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 249L751 257L731 271Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 293H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="49" data-mine="false" data-adjacent="3">
+        <rect x="766" y="234" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 239H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="271" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="50" data-mine="false" data-adjacent="0">
+        <rect x="842" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 239H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="51" data-mine="false" data-adjacent="0">
+        <rect x="918" y="234" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 239H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="269" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="52" data-mine="false" data-adjacent="0">
+        <rect x="6" y="310" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 315H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="345" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="53" data-mine="false" data-adjacent="0">
+        <rect x="82" y="310" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 315H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="345" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="54" data-mine="false" data-adjacent="3">
+        <rect x="158" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 315H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="55" data-mine="true" data-adjacent="">
+        <rect x="234" y="310" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 315H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 367L271 325"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 325L295 333L275 347Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 369H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="56" data-mine="false" data-adjacent="5">
+        <rect x="310" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 315H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#f0a755"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">5</text>
+      </g>
+      <g data-index="57" data-mine="false" data-adjacent="3">
+        <rect x="386" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 315H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="421" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="58" data-mine="false" data-adjacent="3">
+        <rect x="462" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 315H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="497" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="59" data-mine="false" data-adjacent="3">
+        <rect x="538" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 315H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="573" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="60" data-mine="false" data-adjacent="5">
+        <rect x="614" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 315H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#f0a755"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">5</text>
+      </g>
+      <g data-index="61" data-mine="true" data-adjacent="">
+        <rect x="690" y="310" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 315H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 367L727 325"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 325L751 333L731 347Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 369H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="62" data-mine="false" data-adjacent="3">
+        <rect x="766" y="310" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 315H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="347" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="63" data-mine="false" data-adjacent="0">
+        <rect x="842" y="310" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 315H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="345" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="64" data-mine="false" data-adjacent="0">
+        <rect x="918" y="310" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 315H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="345" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="65" data-mine="false" data-adjacent="0">
+        <rect x="6" y="386" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 391H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="421" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="66" data-mine="false" data-adjacent="0">
+        <rect x="82" y="386" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 391H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="421" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="67" data-mine="false" data-adjacent="3">
+        <rect x="158" y="386" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 391H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="423" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="68" data-mine="true" data-adjacent="">
+        <rect x="234" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 391H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 443L271 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 401L295 409L275 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 445H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="69" data-mine="true" data-adjacent="">
+        <rect x="310" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M314 391H376"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M336 443L347 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M346 401L371 409L351 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M330 445H351"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="70" data-mine="true" data-adjacent="">
+        <rect x="386" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M390 391H452"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M412 443L423 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M422 401L447 409L427 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M406 445H427"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="71" data-mine="true" data-adjacent="">
+        <rect x="462" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M466 391H528"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M488 443L499 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M498 401L523 409L503 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M482 445H503"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="72" data-mine="true" data-adjacent="">
+        <rect x="538" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M542 391H604"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M564 443L575 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M574 401L599 409L579 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M558 445H579"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="73" data-mine="true" data-adjacent="">
+        <rect x="614" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M618 391H680"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M640 443L651 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M650 401L675 409L655 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M634 445H655"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="74" data-mine="true" data-adjacent="">
+        <rect x="690" y="386" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 391H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 443L727 401"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 401L751 409L731 423Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 445H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="75" data-mine="false" data-adjacent="3">
+        <rect x="766" y="386" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 391H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="423" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="76" data-mine="false" data-adjacent="0">
+        <rect x="842" y="386" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 391H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="421" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="77" data-mine="false" data-adjacent="0">
+        <rect x="918" y="386" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 391H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="421" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="78" data-mine="false" data-adjacent="0">
+        <rect x="6" y="462" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 467H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="497" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="79" data-mine="false" data-adjacent="0">
+        <rect x="82" y="462" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 467H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="497" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="80" data-mine="false" data-adjacent="3">
+        <rect x="158" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 467H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="81" data-mine="true" data-adjacent="">
+        <rect x="234" y="462" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 467H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 519L271 477"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 477L295 485L275 499Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 521H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="82" data-mine="false" data-adjacent="5">
+        <rect x="310" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 467H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#f0a755"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">5</text>
+      </g>
+      <g data-index="83" data-mine="false" data-adjacent="3">
+        <rect x="386" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 467H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="421" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="84" data-mine="false" data-adjacent="3">
+        <rect x="462" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 467H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="497" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="85" data-mine="false" data-adjacent="3">
+        <rect x="538" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 467H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="573" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="86" data-mine="false" data-adjacent="5">
+        <rect x="614" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 467H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#f0a755"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">5</text>
+      </g>
+      <g data-index="87" data-mine="true" data-adjacent="">
+        <rect x="690" y="462" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 467H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 519L727 477"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 477L751 485L731 499Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 521H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="88" data-mine="false" data-adjacent="3">
+        <rect x="766" y="462" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 467H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="499" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="89" data-mine="false" data-adjacent="0">
+        <rect x="842" y="462" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 467H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="497" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="90" data-mine="false" data-adjacent="0">
+        <rect x="918" y="462" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 467H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="497" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="91" data-mine="false" data-adjacent="0">
+        <rect x="6" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 543H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="92" data-mine="false" data-adjacent="0">
+        <rect x="82" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 543H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="93" data-mine="false" data-adjacent="3">
+        <rect x="158" y="538" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 543H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="575" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="94" data-mine="true" data-adjacent="">
+        <rect x="234" y="538" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 543H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 595L271 553"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 553L295 561L275 575Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 597H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="95" data-mine="false" data-adjacent="3">
+        <rect x="310" y="538" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 543H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="575" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="96" data-mine="false" data-adjacent="0">
+        <rect x="386" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 543H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="97" data-mine="false" data-adjacent="0">
+        <rect x="462" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 543H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="98" data-mine="false" data-adjacent="0">
+        <rect x="538" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 543H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="99" data-mine="false" data-adjacent="3">
+        <rect x="614" y="538" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 543H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="575" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="100" data-mine="true" data-adjacent="">
+        <rect x="690" y="538" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 543H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 595L727 553"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 553L751 561L731 575Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 597H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="101" data-mine="false" data-adjacent="3">
+        <rect x="766" y="538" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 543H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="575" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="102" data-mine="false" data-adjacent="0">
+        <rect x="842" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 543H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="103" data-mine="false" data-adjacent="0">
+        <rect x="918" y="538" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 543H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="573" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="104" data-mine="false" data-adjacent="0">
+        <rect x="6" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 619H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="105" data-mine="false" data-adjacent="0">
+        <rect x="82" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 619H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="106" data-mine="false" data-adjacent="3">
+        <rect x="158" y="614" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 619H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="651" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="107" data-mine="true" data-adjacent="">
+        <rect x="234" y="614" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 619H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 671L271 629"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 629L295 637L275 651Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 673H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="108" data-mine="false" data-adjacent="3">
+        <rect x="310" y="614" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 619H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="651" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="109" data-mine="false" data-adjacent="0">
+        <rect x="386" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 619H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="110" data-mine="false" data-adjacent="0">
+        <rect x="462" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 619H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="111" data-mine="false" data-adjacent="0">
+        <rect x="538" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 619H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="112" data-mine="false" data-adjacent="3">
+        <rect x="614" y="614" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 619H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="651" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="113" data-mine="true" data-adjacent="">
+        <rect x="690" y="614" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 619H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 671L727 629"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 629L751 637L731 651Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 673H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="114" data-mine="false" data-adjacent="3">
+        <rect x="766" y="614" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 619H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="651" text-anchor="middle"
+                    dominant-baseline="middle" fill="#ff6868"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">3</text>
+      </g>
+      <g data-index="115" data-mine="false" data-adjacent="0">
+        <rect x="842" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 619H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="116" data-mine="false" data-adjacent="0">
+        <rect x="918" y="614" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 619H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="649" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="117" data-mine="false" data-adjacent="0">
+        <rect x="6" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 695H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="118" data-mine="false" data-adjacent="0">
+        <rect x="82" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 695H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="119" data-mine="false" data-adjacent="2">
+        <rect x="158" y="690" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 695H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="727" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="120" data-mine="true" data-adjacent="">
+        <rect x="234" y="690" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M238 695H300"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M260 747L271 705"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M270 705L295 713L275 727Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M254 749H275"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="121" data-mine="false" data-adjacent="2">
+        <rect x="310" y="690" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 695H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="727" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="122" data-mine="false" data-adjacent="0">
+        <rect x="386" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 695H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="123" data-mine="false" data-adjacent="0">
+        <rect x="462" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 695H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="124" data-mine="false" data-adjacent="0">
+        <rect x="538" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 695H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="125" data-mine="false" data-adjacent="2">
+        <rect x="614" y="690" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 695H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="727" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="126" data-mine="true" data-adjacent="">
+        <rect x="690" y="690" width="70" height="70" rx="5"
+          fill="url(#mineCell)" stroke="#68532a" stroke-width="2"/>
+        <path d="M694 695H756"
+          stroke="#f5ca68" stroke-opacity="0.34"/>
+        <g filter="url(#goldGlow)" aria-label="flagged mine">
+                <path d="M716 747L727 705"
+                  stroke="#e5aa37" stroke-width="5" stroke-linecap="round"/>
+                <path d="M726 705L751 713L731 727Z"
+                  fill="url(#flagGold)" stroke="#ffe096" stroke-width="2"/>
+                <path d="M710 749H731"
+                  stroke="#9f6c1c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+      </g>
+      <g data-index="127" data-mine="false" data-adjacent="2">
+        <rect x="766" y="690" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 695H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="727" text-anchor="middle"
+                    dominant-baseline="middle" fill="#55cfa4"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">2</text>
+      </g>
+      <g data-index="128" data-mine="false" data-adjacent="0">
+        <rect x="842" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 695H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="129" data-mine="false" data-adjacent="0">
+        <rect x="918" y="690" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 695H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="725" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="130" data-mine="false" data-adjacent="0">
+        <rect x="6" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M10 771H72"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="41" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="131" data-mine="false" data-adjacent="0">
+        <rect x="82" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M86 771H148"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="117" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="132" data-mine="false" data-adjacent="1">
+        <rect x="158" y="766" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M162 771H224"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="193" y="803" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="133" data-mine="false" data-adjacent="1">
+        <rect x="234" y="766" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M238 771H300"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="269" y="803" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="134" data-mine="false" data-adjacent="1">
+        <rect x="310" y="766" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M314 771H376"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="345" y="803" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="135" data-mine="false" data-adjacent="0">
+        <rect x="386" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M390 771H452"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="421" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="136" data-mine="false" data-adjacent="0">
+        <rect x="462" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M466 771H528"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="497" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="137" data-mine="false" data-adjacent="0">
+        <rect x="538" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M542 771H604"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="573" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="138" data-mine="false" data-adjacent="1">
+        <rect x="614" y="766" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M618 771H680"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="649" y="803" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="139" data-mine="false" data-adjacent="1">
+        <rect x="690" y="766" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M694 771H756"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="725" y="803" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="140" data-mine="false" data-adjacent="1">
+        <rect x="766" y="766" width="70" height="70" rx="5"
+          fill="url(#numberCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M770 771H832"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <text x="801" y="803" text-anchor="middle"
+                    dominant-baseline="middle" fill="#6baaff"
+                    font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+                    font-size="34" font-weight="800">1</text>
+      </g>
+      <g data-index="141" data-mine="false" data-adjacent="0">
+        <rect x="842" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M846 771H908"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="877" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+      <g data-index="142" data-mine="false" data-adjacent="0">
+        <rect x="918" y="766" width="70" height="70" rx="5"
+          fill="url(#openCell)" stroke="#263548" stroke-width="2"/>
+        <path d="M922 771H984"
+          stroke="#5b708b" stroke-opacity="0.16"/>
+        <circle cx="953" cy="801" r="2.2" fill="#8391a3" fill-opacity="0.18"/>
+      </g>
+    <path d="M18 1H976" stroke="#ffe4a0" stroke-opacity="0.38" stroke-width="2"/>
+  </g>
+</svg>

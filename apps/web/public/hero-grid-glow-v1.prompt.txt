@@ -1,0 +1,8 @@
+Use case: ads-marketing
+Asset type: H-MineSweeper responsive website hero background layer, decorative grid and lighting only
+Primary request: derive a clean background layer from the reference image while removing the logo text, slogan, tilted Minesweeper board, all numbers, all flags, and every foreground object. Preserve only the sophisticated near-black navy atmosphere, faint perspective technical grid, sparse tiny crosshair registration marks, and restrained blue-gold light falloff.
+Input image: reference image for palette, lighting, cinematic texture, and grid perspective only; do not preserve its text or board.
+Composition: wide 16:9 landscape; left side mostly calm negative space for live HTML heading; perspective grid emerges subtly from the upper-right quadrant and recedes toward center; very dark edges.
+Style: premium black-metal esports interface, understated, realistic material depth, not neon cyberpunk, not casino luxury.
+Color palette: #05080d, #07111d, muted steel-blue grid lines, extremely subtle warm gold glow.
+Constraints: absolutely no letters, words, logos, UI panels, game board, squares resembling Minesweeper cells, numbers, flags, mines, icons, watermark, or border. Background layer only. Keep contrast low enough for white and gold website text to remain readable.
