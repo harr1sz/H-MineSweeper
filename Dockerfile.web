@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1.7
+
+ARG NODE_IMAGE=node:22.13.1-bookworm-slim
+
+FROM ${NODE_IMAGE} AS build
+
+ARG APP_VERSION=0.2.0-alpha.1
+ARG BUILD_SHA=development
+ARG REGION=local
+ARG VITE_TELEMETRY_ENABLED=true
+ARG VITE_DUEL_EXPERIMENT=false
+
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
+
+WORKDIR /workspace
+
+RUN corepack enable \
+  && corepack prepare pnpm@11.9.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/game-core/package.json packages/game-core/package.json
+
+RUN --mount=type=cache,id=hms-pnpm-store,target=/pnpm/store \
+  pnpm install --frozen-lockfile
+
+COPY apps/web apps/web
+COPY packages/game-core packages/game-core
+
+RUN VITE_APP_VERSION="${APP_VERSION}" \
+  VITE_BUILD_SHA="${BUILD_SHA}" \
+  VITE_BUILD_REGION="${REGION}" \
+  VITE_TELEMETRY_ENABLED="${VITE_TELEMETRY_ENABLED}" \
+  VITE_DUEL_EXPERIMENT="${VITE_DUEL_EXPERIMENT}" \
+  pnpm --filter @h-minesweeper/web build
+
+FROM nginx:1.27.4-alpine AS runtime
+
+ARG APP_VERSION=0.2.0-alpha.1
+ARG BUILD_SHA=development
+ARG REGION=local
+
+LABEL org.opencontainers.image.title="H-MineSweeper Alpha web" \
+  org.opencontainers.image.version="${APP_VERSION}" \
+  org.opencontainers.image.revision="${BUILD_SHA}" \
+  io.h-minesweeper.region="${REGION}" \
+  org.opencontainers.image.description="Single-origin public-access Alpha web gateway"
+
+COPY deploy/nginx.conf /etc/nginx/nginx.conf
+COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html
+
+USER nginx
+
+EXPOSE 8080 8443
+STOPSIGNAL SIGQUIT
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=4 \
+  CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/web-healthz"]

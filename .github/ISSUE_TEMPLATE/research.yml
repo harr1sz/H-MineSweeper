@@ -1,0 +1,49 @@
+name: Research question
+description: Track an unverified product assumption without presenting it as fact.
+title: "[Research] "
+labels:
+  - type:research
+  - confidence:hypothesis
+body:
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Falsifiable hypothesis
+      description: State what is believed, for which user group, and what result would disprove it.
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision this research unlocks
+      description: Explain what will change for Go, warning, and No-go outcomes.
+    validations:
+      required: true
+  - type: textarea
+    id: current_evidence
+    attributes:
+      label: Current evidence and uncertainty
+      description: Separate observed facts, inference, and missing evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Method and sample
+      description: Define the target population, denominator, collection method, duration, and segmentation.
+    validations:
+      required: true
+  - type: textarea
+    id: thresholds
+    attributes:
+      label: Pre-registered thresholds
+      description: Freeze metric formulas, exclusions, missing-data handling, and decision thresholds before collection.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and participant safety
+      description: List collected fields, retention, consent, opt-out, deletion, and support path.
+    validations:
+      required: true

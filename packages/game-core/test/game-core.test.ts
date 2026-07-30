@@ -68,7 +68,7 @@ function manualBoard(
 
 describe("public constants and validation", () => {
   it("publishes the fixed protocol, classic presets, and 32 unique seeds", () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+    expect(PROTOCOL_VERSION).toBe(2);
     expect(PRESET_SPECS.beginner).toEqual({
       width: 9,
       height: 9,

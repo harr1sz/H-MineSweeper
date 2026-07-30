@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <strong>同一张棋盘，同一个时钟。</strong><br />
-  <strong>Same board. Same clock.</strong>
+  <strong>让每一局，都成为下一局的依据。</strong><br />
+  <strong>Build a memory. Train the gap.</strong>
 </p>
 
 <p align="center">
@@ -17,17 +17,17 @@
 
 ## 中文
 
-H-MineSweeper 是一个黑金风格的低延迟扫雷项目。目前版本同时提供完整的本地单人游戏、循序渐进的扫雷学院，以及使用同一张棋盘进行实时竞速的 1v1 房间。
+H-MineSweeper 是一个黑金风格的专业单人扫雷训练项目。单人训练是当前唯一主产品；扫雷学院是辅助学习入口；同图实时 1v1 是可以独立关闭的实验功能。
 
-这个仓库仍处于 Phase 0.5。单人和教学部分可以完整游玩；多人模式用于验证操作手感、实时进度和 Bo3 对抗循环，还不是正式排位系统。
+这个仓库仍处于 Phase 0.5，正在建设 `v0.2.0-alpha.N` 公开访问候选版本。公开 Alpha 无账号、访问码、白名单或封闭研究门槛。Phase 1 只有在公开 Alpha 的指标定义、观察窗口和缺失数据规则预先冻结，并由真实公开流量得到足够证据后才算完成；代码合并、CI 通过、Alpha RC 部署或功能数量增加都不等于产品验证完成。
 
 ### 当前可以体验什么
 
 | 模式 | 当前能力 | 成绩状态 |
 | --- | --- | --- |
-| 单人游戏 | 初级、中级、高级、自定义、经典随机、无猜生成 | 本地保存，不进入公开榜 |
-| 扫雷学院 | 第 0 至 3 章、分级提示、proof 验证、定式与反例 | 训练成绩 |
-| 多人对战 | 房间码 1v1、同图竞速、Bo3、进度对比、即时重赛 | 原型比赛，无正式评级 |
+| 专业单人训练 | 初级、中级、高级、自定义、经典随机、无猜生成、本地历史与同规格趋势 | `LOCAL_UNVERIFIED`，不进入公开榜 |
+| 扫雷学院 | 第 0 至 3 章、分级提示、proof 验证、定式与反例 | 辅助学习结果 |
+| 实验 1v1 | 房间码竞速、Bo3、进度对比、即时重赛 | Feature Flag 控制，无正式评级 |
 
 ### 单人游戏
 
@@ -48,9 +48,9 @@ H-MineSweeper 是一个黑金风格的低延迟扫雷项目。目前版本同时
 - 第 2 章：共有区、独享区和集合包含。
 - 第 3 章：1-2-1、1-2-2-1 及其反例。
 - H1 至 H7 提示会逐级展开。高级提示来自求解器 proof，不读取隐藏雷图猜答案。
-- 学习进度、Logic Streak 和练习记录保存在本机。
+- 课程进度和练习结果保存在本机；当前 Logic Streak 只代表本次页面会话，不宣称跨会话连续记录。
 
-### 1v1 对战
+### 实验 1v1
 
 两名玩家在各自界面解决同一张 Expert 无猜棋盘。双方不会抢格，也看不到对方的点击路线。
 
@@ -61,7 +61,11 @@ H-MineSweeper 是一个黑金风格的低延迟扫雷项目。目前版本同时
 - 每个测试房间最多使用 15 张不重复棋盘。
 - 赛后可以下载 JSON 回放并直接发起重赛。
 
-当前 1v1 使用 `client_seed`。客户端即时展开棋盘，服务端独立复算动作和结果。这套模式适合测试手感，但无法提供正式排行榜所需的反作弊强度。断线或状态分歧会冻结当前比赛并记为技术 DNF。
+当前 1v1 使用 `client_seed`。客户端即时展开棋盘，服务端独立复算动作和结果。这套模式适合测试手感，但无法提供正式排行榜所需的反作弊强度。只有协议解码、可靠序号、截止点回滚、Replay 预算和真实双端闸门全部通过时，`duelExperiment` 才能打开；失败时关闭入口，单人 Alpha 继续。
+
+网页入口和服务端传输分别由 `VITE_DUEL_EXPERIMENT` 与
+`H_MINESWEEPER_DUEL_EXPERIMENT` 控制，二者均默认关闭。服务端关闭时，
+guest、room、Replay 和 WebSocket 路径不可用，但公开单人和本地历史继续运行。仅影响 1v1 的事故只关闭 1v1，不暂停健康单人。
 
 ### 操作
 
@@ -71,13 +75,13 @@ H-MineSweeper 是一个黑金风格的低延迟扫雷项目。目前版本同时
 | 键盘 | Enter / Space | F | C |
 | 触屏 | 点击 | 长按 350ms | 点击已揭数字 |
 
-触屏棋盘支持平移和双指缩放。键盘方向键可以移动焦点。
+窄屏初级棋盘会完整适配容器；中、高级棋盘在棋盘容器内平移，并提供显式缩放按钮。滑动不会当作揭格。键盘方向键可以移动焦点。
 
 ### 本地运行
 
 需要：
 
-- Node.js 22.12 或更高版本
+- Node.js 22.13 或更高版本
 - pnpm 11
 
 安装依赖并启动 Web 与实时服务：
@@ -105,6 +109,12 @@ pnpm dev
 
 其他配置见 [`.env.example`](./.env.example)。
 
+### 公开 Alpha 与遥测边界
+
+公开 Alpha 的产品政策是无访问门槛：全新浏览器应能直接打开首页、进入学院和开始单人游戏，不需要账号、登记或研究同意。仓库实现已移除旧的邀请码访问控制；公开遥测会话只授权偏好与事件接口，不解锁任何产品路由，并固定标记为 `public/unsegmented`。在不可变部署产物通过匿名访问 smoke 前，这些本地实现仍不能作为 M2 Alpha RC 证据。
+
+假名化原始事件和公开会话状态固定保留 7 天，到期删除，不因分析或产品研究延长；去除安装 ID 和单人明细的日聚合最多保留 30 天。用户可以退出遥测并删除仍在保留期内的可归属原始事件，本地历史不受影响。
+
 ### 常用命令
 
 | 命令 | 用途 |
@@ -121,7 +131,7 @@ pnpm dev
 apps/web             React 19、Vite 8、Canvas 2D、单人游戏与扫雷学院
 apps/server          Fastify 5、ws 8、REST、实时网关与房间 Actor
 packages/game-core   PRNG、棋盘规则、求解器、协议、统计与 golden vectors
-scripts              可复现的品牌棋盘资产生成脚本
+scripts              品牌资产、发布验证、合成探针与回滚校验
 ```
 
 React 负责菜单、配置面板和结果页。实际扫雷棋盘使用双层 Canvas 2D，基础棋盘与短时特效分开绘制。棋盘状态使用 typed array；普通动作只重绘发生变化的格子。
@@ -132,13 +142,17 @@ React 负责菜单、配置面板和结果页。实际扫雷棋盘使用双层 C
 
 ```bash
 pnpm check
+pnpm --filter @h-minesweeper/web e2e
 ```
 
 测试覆盖：
 
 - 固定 seed、首击安全、邻雷计数、洪泛、插旗与和弦。
 - 无猜求解 proof、3BV、CPS、3BV/s 和 IOE。
+- 本地历史 Schema、迁移、幂等写入、导入导出、损坏恢复和同规格趋势。
+- 假名化遥测、容量上限、运行时协议解码和可靠序号。
 - 双客户端 WebSocket、Bo3 重赛、重复动作、终局竞态和房间回收。
+- 浏览器级移动可达性、键盘、200% 缩放、历史恢复和公开入口。
 - 棋盘脏格重绘、像素预算和最小格可读性。
 
 浏览器性能样本保存在 `globalThis.__HMS_PERF__`。其中包括输入到下一帧、规则应用、整盘绘制、脏格绘制和特效层帧间隔。这些数据用于本地回归检查，不代表公开 Beta 的跨设备 SLA。
@@ -150,37 +164,39 @@ pnpm check
 - 2 至 10 人房间与重连。
 - OIDC 账号、匹配、Glicko-2 评级和赛季。
 - `server_secret` 正式棋盘与一次性棋盘库存。
-- 数据库、持久化回放和公开排行榜。
+- 账号/云同步历史、持久化多人回放和公开排行榜。
 - 举报、隔离复核与申诉流程。
 
 正式排位不会直接沿用当前 `client_seed` 模式。它需要服务器保密雷图、完整权威回放和经过验证的延迟公平性。
 
-### 后续计划
+### 当前阶段路线
 
-1. 使用熟练玩家验证 1v1 的直接对抗感、重赛率和延迟体验。
-2. 加入 2 至 10 人休闲房、快照重连和完整遥测。
-3. 建设 `server_secret`、影子评级、匹配与持久化回放。
-4. 达到公平性和反作弊闸门后，再开放正式排位与公开榜。
+1. M0：统一阶段事实、仓库维护面和 320–390px 棋盘可达性。
+2. M1：完成“终局—本地历史—同规格趋势—调整下一局”的专业单人闭环。
+3. M2：完成无门槛公开访问、容量/协议/回滚闸门和单区域 Alpha RC。
+4. 公开 Alpha 验证：预先冻结指标、观察窗口和缺失数据规则，使用真实公开流量决定扩大、聚焦修订或停止；不设置封闭样本或预定人数。
+
+详细定义见 [`docs/product-phase-and-release-policy.md`](./docs/product-phase-and-release-policy.md)。
 
 ### 许可证
 
-这个仓库目前公开用于查看、测试和协作，但尚未选择开源许可证。除非后续添加许可证，否则代码复用仍受默认版权规则约束。
+H-MineSweeper 使用 [MIT License](./LICENSE) 开源。欢迎提交 issue 和外部 PR；提交不代表自动接受。安全问题请使用 [`SECURITY.md`](./SECURITY.md) 的私密报告入口。
 
 ---
 
 ## English
 
-H-MineSweeper is a low-latency Minesweeper project with a black-and-gold interface. The current build includes a complete local solo game, a guided training mode, and real-time 1v1 rooms where both players race on the same board.
+H-MineSweeper is a black-and-gold professional solo Minesweeper training project. Solo training is the only primary product in this Alpha; the Academy is a supporting learning entry point; same-board real-time 1v1 is an independently switchable experiment.
 
-The repository is at Phase 0.5. Solo play and the training chapters are fully playable. Multiplayer is an early test of input feel, live progress, and the best-of-three match loop. It is not a ranked service yet.
+The repository remains at Phase 0.5 while it builds `v0.2.0-alpha.N` public-access candidates. The public Alpha has no account, access-code, allowlist, or closed-research gate. Phase 1 closes only after metric definitions, observation windows, and missing-data rules are frozen in advance and real public traffic supplies sufficient evidence. A merge, green CI run, deployed Alpha RC, or larger feature count is not product validation.
 
 ### What you can play
 
 | Mode | Available now | Result status |
 | --- | --- | --- |
-| Solo | Beginner, Intermediate, Expert, custom boards, classic random, no-guess generation | Saved locally, not eligible for a public leaderboard |
-| Academy | Chapters 0 through 3, staged hints, proof checks, patterns and counterexamples | Training result |
-| Multiplayer | Room-code 1v1, same-board racing, best of three, progress comparison, instant rematch | Prototype match, no official rating |
+| Professional solo | Beginner, Intermediate, Expert, custom boards, classic random, no-guess generation, local history, and like-for-like trends | `LOCAL_UNVERIFIED`, not eligible for a public leaderboard |
+| Academy | Chapters 0 through 3, staged hints, proof checks, patterns and counterexamples | Supporting learning result |
+| Experimental 1v1 | Room-code racing, best of three, progress comparison, instant rematch | Feature-flagged, no official rating |
 
 ### Solo play
 
@@ -201,9 +217,9 @@ The Academy teaches deductions from the visible board instead of asking players 
 - Chapter 2 introduces shared cells, exclusive cells, and set inclusion.
 - Chapter 3 covers 1-2-1, 1-2-2-1, and counterexamples.
 - Hints progress from H1 to H7. Advanced hints come from solver proofs and never inspect hidden mines to invent an answer.
-- Course progress, Logic Streak, and practice history stay on the local device.
+- Course progress and practice results stay on the local device. The current Logic Streak describes only the active page session; it is not presented as a cross-session streak.
 
-### Real-time 1v1
+### Experimental real-time 1v1
 
 Each player solves the same Expert no-guess board in a separate view. Players do not compete for cells, and neither player can see the other's cursor or route.
 
@@ -214,7 +230,13 @@ Each player solves the same Expert no-guess board in a separate view. Players do
 - A test room uses no more than 15 non-repeating boards.
 - Players can download the JSON replay and start a rematch from the result screen.
 
-The current 1v1 mode uses `client_seed`. The client reveals cells immediately while the server recomputes actions and results. This is useful for testing responsiveness, but it does not provide the anti-cheat guarantees needed for an official leaderboard. A disconnect or state mismatch freezes the match and records a technical DNF.
+The current 1v1 mode uses `client_seed`. The client reveals cells immediately while the server recomputes actions and results. This is useful for testing responsiveness, but it does not provide the anti-cheat guarantees needed for an official leaderboard. `duelExperiment` can be enabled only after protocol decoding, reliable sequencing, deadline rollback, replay-budget, and real two-client gates pass. A failure keeps 1v1 off without blocking the solo Alpha.
+
+The browser entry and server transport are controlled independently by
+`VITE_DUEL_EXPERIMENT` and `H_MINESWEEPER_DUEL_EXPERIMENT`; both default to
+off. With the server flag off, guest, room, replay, and WebSocket surfaces are
+unavailable while public solo and local history continue. A duel-only incident
+turns off 1v1 and does not pause healthy solo.
 
 ### Controls
 
@@ -224,13 +246,13 @@ The current 1v1 mode uses `client_seed`. The client reveals cells immediately wh
 | Keyboard | Enter / Space | F | C |
 | Touch | Tap | Hold for 350ms | Tap a revealed number |
 
-Touch boards support panning and pinch zoom. Arrow keys move the keyboard focus.
+Beginner boards fit the narrow viewport. Intermediate and Expert boards pan inside the board viewport and expose explicit zoom controls. A swipe is not treated as a reveal. Arrow keys move the keyboard focus.
 
 ### Run locally
 
 Requirements:
 
-- Node.js 22.12 or newer
+- Node.js 22.13 or newer
 - pnpm 11
 
 Install dependencies and start the web app and real-time server:
@@ -258,6 +280,31 @@ pnpm dev
 
 See [`.env.example`](./.env.example) for the remaining settings.
 
+### Public Alpha and telemetry boundary
+
+The product policy is ungated public access. A fresh browser must be able to
+open the home page, enter the Academy, and start solo play without an account,
+credential, registration, or research consent. The repository implementation
+has removed the legacy invitation gate. Its public telemetry session authorizes
+only preference and event endpoints, unlocks no product route, and is fixed to
+`public/unsegmented`. These local changes are not M2 Alpha RC evidence until an
+anonymous-access smoke test passes against the frozen deployed artifact.
+
+The implemented telemetry schema accepts only named events with allowlisted
+properties and excludes display names, private room data, guest tokens, seeds,
+and free-text errors. Pseudonymous raw events and public-session state expire
+after seven days and are not extended for analysis or product research.
+Identifier-free daily counts expire within 30 days. Users can opt out and
+delete attributable raw events that remain inside the retention window without
+affecting local history.
+
+REST token buckets, guest and room capacity limits, replay response byte
+limits, and timer-driven expiry are independent of the WebSocket message
+limiter. `/live`, `/ready`, and `/version` keep liveness, dependency readiness,
+and build identity distinct. Optional network-surface exhaustion must not make
+healthy local solo unavailable. `/health` remains a compatibility alias for
+`/api/v1/health` for one release.
+
 ### Commands
 
 | Command | Purpose |
@@ -274,7 +321,7 @@ See [`.env.example`](./.env.example) for the remaining settings.
 apps/web             React 19, Vite 8, Canvas 2D, solo play, and the Academy
 apps/server          Fastify 5, ws 8, REST, real-time gateway, and room actors
 packages/game-core   PRNG, board rules, solver, protocol, metrics, and golden vectors
-scripts              Reproducible generators for branded board assets
+scripts              Brand assets, release checks, synthetic probes, and rollback verification
 ```
 
 React handles menus, configuration, and result screens. The game board uses two Canvas 2D layers, one for board state and one for short effects. Typed arrays hold board state, and ordinary actions redraw only the cells that changed.
@@ -285,13 +332,17 @@ The server assigns a single-writer actor to each room. It processes actions in r
 
 ```bash
 pnpm check
+pnpm --filter @h-minesweeper/web e2e
 ```
 
 The test suite covers:
 
 - Seeded generation, first-click safety, adjacent counts, flood reveal, flags, and chords.
 - No-guess solver proofs, 3BV, CPS, 3BV/s, and IOE.
+- Local-history schema, migration, idempotent writes, import/export, corruption recovery, and like-for-like trends.
+- Pseudonymous telemetry, capacity limits, runtime protocol decoding, and reliable sequencing.
 - Two-client WebSocket sessions, best-of-three rematches, duplicate actions, terminal races, and room cleanup.
+- Browser-level mobile reachability, keyboard use, 200% zoom, history recovery, and public entry.
 - Dirty-cell rendering, Canvas pixel budgets, and minimum-cell readability.
 
 Browser performance samples are available at `globalThis.__HMS_PERF__`. They include input-to-paint timing, rule application, full-board drawing, dirty-cell drawing, and effect-layer frame intervals. These figures are local regression data, not a cross-device SLA for a public beta.
@@ -303,18 +354,20 @@ The following work is still pending:
 - Rooms for 2 to 10 players and reconnect support.
 - OIDC accounts, matchmaking, Glicko-2 ratings, and seasons.
 - Official `server_secret` boards and a one-use board inventory.
-- Database storage, persistent replays, and public leaderboards.
+- Account/cloud-synced history, persistent multiplayer replays, and public leaderboards.
 - Reports, quarantine review, and appeals.
 
 Official ranked play will not reuse the current `client_seed` setup. It requires secret server boards, complete authoritative replays, and measured latency fairness.
 
-### Roadmap
+### Current phase path
 
-1. Test whether experienced players perceive the 1v1 mode as direct competition, then measure rematches and latency feedback.
-2. Add casual rooms for 2 to 10 players, snapshot reconnects, and complete telemetry.
-3. Build `server_secret`, shadow ratings, matchmaking, and persistent replays.
-4. Open ranked play and public leaderboards only after the fairness and anti-cheat gates pass.
+1. M0: establish phase truth, maintainable GitHub surfaces, and 320–390px board reachability.
+2. M1: complete the professional solo loop from terminal result to local history, like-for-like trends, and the next training decision.
+3. M2: complete ungated public access, capacity/protocol/rollback gates, and a single-region Alpha RC.
+4. Public Alpha validation: freeze metrics, observation windows, and missing-data rules in advance, then use real public traffic to decide whether to expand, focus a revision, or stop. There is no closed sample or predetermined headcount.
+
+See [`docs/product-phase-and-release-policy.md`](./docs/product-phase-and-release-policy.md).
 
 ### License
 
-This repository is public for inspection, testing, and collaboration, but it does not have an open-source license yet. Until a license is added, the default copyright rules still apply.
+H-MineSweeper is open source under the [MIT License](./LICENSE). Issues and external pull requests are welcome, but submission does not imply automatic acceptance. Report security issues privately through [`SECURITY.md`](./SECURITY.md).

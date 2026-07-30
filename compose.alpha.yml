@@ -1,0 +1,111 @@
+name: h-minesweeper-alpha
+
+services:
+  server:
+    image: "${H_MINESWEEPER_SERVER_IMAGE_REF:?set the immutable server image reference, preferably registry/name@sha256:digest}"
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+      args:
+        APP_VERSION: "${H_MINESWEEPER_APP_VERSION:?set H_MINESWEEPER_APP_VERSION}"
+        BUILD_SHA: "${H_MINESWEEPER_BUILD_SHA:?set H_MINESWEEPER_BUILD_SHA}"
+        REGION: "${H_MINESWEEPER_REGION:?set H_MINESWEEPER_REGION}"
+    restart: unless-stopped
+    stop_grace_period: 20s
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      H_MINESWEEPER_HOST: "0.0.0.0"
+      H_MINESWEEPER_PORT: "3001"
+      H_MINESWEEPER_ALLOWED_ORIGINS: "${H_MINESWEEPER_PUBLIC_ORIGIN:?set the exact public origin}"
+      H_MINESWEEPER_LOG_LEVEL: "${H_MINESWEEPER_LOG_LEVEL:-warn}"
+      H_MINESWEEPER_TRUST_PROXY_HOPS: "1"
+      H_MINESWEEPER_DUEL_EXPERIMENT: "${H_MINESWEEPER_DUEL_EXPERIMENT:-false}"
+      H_MINESWEEPER_MAX_TELEMETRY_SESSIONS: "${H_MINESWEEPER_MAX_TELEMETRY_SESSIONS:-50000}"
+      H_MINESWEEPER_TELEMETRY_SQLITE_FILE: "/data/telemetry.sqlite3"
+      H_MINESWEEPER_TELEMETRY_REQUIRE_PERSISTENT_STORE: "true"
+      H_MINESWEEPER_TELEMETRY_SECRET: "${H_MINESWEEPER_TELEMETRY_SECRET:?set a 32+ character secret}"
+      H_MINESWEEPER_TELEMETRY_AGGREGATE_TTL_MS: "2592000000"
+      H_MINESWEEPER_MAX_RAW_TELEMETRY_EVENTS: "${H_MINESWEEPER_MAX_RAW_TELEMETRY_EVENTS:-250000}"
+      H_MINESWEEPER_MAX_RAW_TELEMETRY_BYTES: "${H_MINESWEEPER_MAX_RAW_TELEMETRY_BYTES:-268435456}"
+      H_MINESWEEPER_MAX_TELEMETRY_AGGREGATE_BUCKETS: "${H_MINESWEEPER_MAX_TELEMETRY_AGGREGATE_BUCKETS:-10000}"
+      H_MINESWEEPER_REST_RATE_LIMIT_PER_MINUTE: "${H_MINESWEEPER_REST_RATE_LIMIT_PER_MINUTE:-120}"
+      H_MINESWEEPER_REST_RATE_LIMIT_BURST: "${H_MINESWEEPER_REST_RATE_LIMIT_BURST:-30}"
+      H_MINESWEEPER_REST_RATE_LIMIT_MAX_BUCKETS: "${H_MINESWEEPER_REST_RATE_LIMIT_MAX_BUCKETS:-50000}"
+      H_MINESWEEPER_MAX_GUEST_SESSIONS: "${H_MINESWEEPER_MAX_GUEST_SESSIONS:-10000}"
+      H_MINESWEEPER_MAX_ROOMS: "${H_MINESWEEPER_MAX_ROOMS:-2000}"
+      H_MINESWEEPER_MAX_REPLAY_RESPONSE_BYTES: "${H_MINESWEEPER_MAX_REPLAY_RESPONSE_BYTES:-5242880}"
+      H_MINESWEEPER_MAX_REPLAY_EVENTS: "${H_MINESWEEPER_MAX_REPLAY_EVENTS:-10000}"
+      H_MINESWEEPER_MAX_REPLAY_BYTES: "${H_MINESWEEPER_MAX_REPLAY_BYTES:-5242880}"
+      H_MINESWEEPER_MAINTENANCE_INTERVAL_MS: "${H_MINESWEEPER_MAINTENANCE_INTERVAL_MS:-30000}"
+      H_MINESWEEPER_BUILD_SHA: "${H_MINESWEEPER_BUILD_SHA:?set H_MINESWEEPER_BUILD_SHA}"
+      H_MINESWEEPER_REGION: "${H_MINESWEEPER_REGION:?set H_MINESWEEPER_REGION}"
+      H_MINESWEEPER_APP_VERSION: "${H_MINESWEEPER_APP_VERSION:?set H_MINESWEEPER_APP_VERSION}"
+      H_MINESWEEPER_LOCAL_SCHEMA_VERSION: "${H_MINESWEEPER_LOCAL_SCHEMA_VERSION:-HMS-local-history-v1}"
+    volumes:
+      - alpha-data:/data
+    expose:
+      - "3001"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 4
+
+  web:
+    image: "${H_MINESWEEPER_WEB_IMAGE_REF:?set the immutable web image reference, preferably registry/name@sha256:digest}"
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        APP_VERSION: "${H_MINESWEEPER_APP_VERSION:?set H_MINESWEEPER_APP_VERSION}"
+        BUILD_SHA: "${H_MINESWEEPER_BUILD_SHA:?set H_MINESWEEPER_BUILD_SHA}"
+        REGION: "${H_MINESWEEPER_REGION:?set H_MINESWEEPER_REGION}"
+        VITE_TELEMETRY_ENABLED: "true"
+        VITE_DUEL_EXPERIMENT: "${H_MINESWEEPER_DUEL_EXPERIMENT:-false}"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    secrets:
+      - hms_tls_certificate
+      - hms_tls_private_key
+    ports:
+      - "${H_MINESWEEPER_BIND_ADDRESS:-0.0.0.0}:${H_MINESWEEPER_PUBLIC_PORT:-443}:8443"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8080/web-healthz
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 4
+
+volumes:
+  alpha-data:
+    name: "${H_MINESWEEPER_DATA_VOLUME:-h-minesweeper-alpha-data}"
+
+secrets:
+  hms_tls_certificate:
+    file: "${H_MINESWEEPER_TLS_CERTIFICATE_FILE:?set the TLS certificate file path}"
+  hms_tls_private_key:
+    file: "${H_MINESWEEPER_TLS_PRIVATE_KEY_FILE:?set the TLS private key file path}"

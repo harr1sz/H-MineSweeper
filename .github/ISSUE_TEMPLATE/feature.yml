@@ -1,0 +1,48 @@
+name: Feature or PRD slice
+description: Propose a scoped, testable product change.
+title: "[Feature] "
+labels:
+  - type:feature
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Describe the user and problem without assuming the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Current evidence
+      description: Link verified behavior, research, support cases, or code evidence. Mark assumptions explicitly.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: Define what this issue will and will not change.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use externally observable and testable outcomes.
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Interfaces and data contracts
+      description: Note schema, API, protocol, privacy, accessibility, and compatibility effects.
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk and rollback
+      description: Explain failure modes, feature flags, migrations, and rollback.
+    validations:
+      required: true

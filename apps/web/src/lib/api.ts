@@ -15,8 +15,20 @@ interface ApiErrorShape {
   message?: string;
 }
 
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    credentials: "same-origin",
     ...init,
     headers: {
       "content-type": "application/json",
@@ -26,7 +38,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiErrorShape;
-    throw new Error(body.message ?? body.error ?? `请求失败（${response.status}）`);
+    throw new ApiError(
+      body.error ?? "REQUEST_FAILED",
+      response.status,
+      body.message ?? body.error ?? `请求失败（${response.status}）`,
+    );
   }
 
   return (await response.json()) as T;

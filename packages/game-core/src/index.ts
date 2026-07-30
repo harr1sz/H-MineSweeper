@@ -5,7 +5,7 @@
  * mutate the supplied state in place and return the exact authoritative delta.
  */
 
-export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_VERSION = 2 as const;
 export const THREE_BV_RULES_VERSION = "HMS-3BV-v1" as const;
 export const CLICK_COUNTING_RULES_VERSION =
   "HMS-board-action-counting-v1" as const;
@@ -1465,6 +1465,7 @@ export interface ClientActionEnvelope {
   readonly connectionEpoch: number;
   readonly clientActionId: string;
   readonly lastServerSeq: number;
+  readonly baseStateHash: string;
   readonly actionType: ClientActionType;
   readonly cellIndex?: number;
   readonly clientMonoTelemetry: number;
@@ -1569,13 +1570,17 @@ export interface ActionResultServerMessage extends SequencedServerMessage {
   readonly rejectReason?: string;
   readonly delta?: RevealDelta;
   readonly duplicate: boolean;
-  readonly stateHash: string;
+  readonly authoritativeStateHash: string;
+  readonly reconcile: "NONE" | "ROLLBACK" | "SNAPSHOT_REQUIRED";
 }
 
-export interface ProgressServerMessage extends SequencedServerMessage {
+export interface ProgressServerMessage {
   readonly type: "PROGRESS";
+  readonly v: typeof PROTOCOL_VERSION;
   readonly matchId: string;
   readonly round: number;
+  readonly progressSeq: number;
+  readonly generatedAt: number;
   readonly progress: readonly PublicProgress[];
 }
 

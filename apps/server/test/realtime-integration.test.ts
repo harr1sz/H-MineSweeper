@@ -1,4 +1,7 @@
-import { createBoard } from "@h-minesweeper/game-core";
+import {
+  PROTOCOL_VERSION,
+  createBoard,
+} from "@h-minesweeper/game-core";
 import type { BoardSpec } from "@h-minesweeper/game-core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +17,13 @@ interface WireMessage {
   readonly boardSpec?: BoardSpec;
   readonly replayId?: string;
   readonly phase?: string;
+  readonly stateHash?: string;
+  readonly authoritativeStateHash?: string;
+  readonly progressSeq?: number;
+  readonly generatedAt?: number;
+  readonly code?: string;
+  readonly rejectReason?: string;
+  readonly reconcile?: string;
 }
 
 class TestClient {
@@ -28,6 +38,8 @@ class TestClient {
   #lastServerSeq = 0;
   #matchId = "";
   #connectionEpoch = 0;
+  #roomStateHash = "";
+  #gameStateHash = "";
 
   constructor(readonly socket: WebSocket) {
     socket.on("message", (data) => {
@@ -39,6 +51,15 @@ class TestClient {
       if (message.matchId) this.#matchId = message.matchId;
       if (message.connectionEpoch) {
         this.#connectionEpoch = message.connectionEpoch;
+      }
+      if (message.type === "ROOM_STATE" && message.stateHash) {
+        this.#roomStateHash = message.stateHash;
+      }
+      if (message.type === "ROUND_ACTIVE" && message.stateHash) {
+        this.#gameStateHash = message.stateHash;
+      }
+      if (message.type === "ACTION_RESULT" && message.authoritativeStateHash) {
+        this.#gameStateHash = message.authoritativeStateHash;
       }
 
       for (const waiter of this.#waiters) {
@@ -61,7 +82,11 @@ class TestClient {
       socket.once("open", resolve);
       socket.once("error", reject);
     });
-    socket.send(JSON.stringify({ type: "HELLO", v: 1, ticket }));
+    socket.send(JSON.stringify({
+      type: "HELLO",
+      v: PROTOCOL_VERSION,
+      ticket,
+    }));
     await client.next("WELCOME");
     return client;
   }
@@ -87,7 +112,9 @@ class TestClient {
         reject,
         timer: setTimeout(() => {
           this.#waiters.delete(waiter);
-          reject(new Error(`Timed out waiting for ${type}`));
+          reject(new Error(
+            `Timed out waiting for ${type}; queued=${JSON.stringify(this.#messages)}`,
+          ));
         }, timeoutMs),
       };
       this.#waiters.add(waiter);
@@ -99,19 +126,30 @@ class TestClient {
     cellIndex?: number,
   ): void {
     this.#actionCounter += 1;
+    const boardAction =
+      actionType === "REVEAL" ||
+      actionType === "TOGGLE_FLAG" ||
+      actionType === "CHORD";
     this.socket.send(JSON.stringify({
       type: "ACTION",
       envelope: {
-        v: 1,
+        v: PROTOCOL_VERSION,
         matchId: this.#matchId,
         connectionEpoch: this.#connectionEpoch,
         clientActionId: `integration-${this.#actionCounter}`,
         lastServerSeq: this.#lastServerSeq,
+        baseStateHash: boardAction
+          ? this.#gameStateHash
+          : this.#roomStateHash,
         actionType,
         ...(cellIndex === undefined ? {} : { cellIndex }),
         clientMonoTelemetry: performance.now(),
       },
     }));
+  }
+
+  sendRaw(message: unknown): void {
+    this.socket.send(JSON.stringify(message));
   }
 
   async close(): Promise<void> {
@@ -155,6 +193,41 @@ async function createGuest(
 }
 
 describe("real WebSocket duel", () => {
+  it("rejects the realtime transport when the duel experiment is disabled", async () => {
+    const app = createApp({
+      logger: false,
+      config: {
+        ...loadConfig({}),
+        allowedOrigins: new Set(["http://127.0.0.1:5173"]),
+        duelExperimentEnabled: false,
+      },
+    });
+    apps.push(app);
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected an ephemeral TCP address");
+    }
+
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/realtime/v2`,
+      { origin: "http://127.0.0.1:5173" },
+    );
+    socket.on("error", () => undefined);
+    const statusCode = await new Promise<number | undefined>(
+      (resolve, reject) => {
+        socket.once("unexpected-response", (_request, response) => {
+          resolve(response.statusCode);
+        });
+        socket.once("open", () => {
+          reject(new Error("Disabled realtime transport unexpectedly opened"));
+        });
+      },
+    );
+    expect(statusCode).toBe(404);
+    socket.terminate();
+  });
+
   it("completes ten unique rounds across five Bo3 matches without divergent boards", async () => {
     const base = loadConfig({});
     const app = createApp({
@@ -162,6 +235,7 @@ describe("real WebSocket duel", () => {
       config: {
         ...base,
         allowedOrigins: new Set(["http://127.0.0.1:5173"]),
+        duelExperimentEnabled: true,
         countdownMs: 2,
         terminalWindowMs: 2,
         roundDurationMs: 2_000,
@@ -175,7 +249,7 @@ describe("real WebSocket duel", () => {
       throw new Error("Expected an ephemeral TCP address");
     }
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    const websocketUrl = `ws://127.0.0.1:${address.port}/realtime/v1`;
+    const websocketUrl = `ws://127.0.0.1:${address.port}/realtime/v2`;
 
     const hostGuest = await createGuest(baseUrl, "Alpha");
     const rivalGuest = await createGuest(baseUrl, "Bravo");
@@ -205,6 +279,17 @@ describe("real WebSocket duel", () => {
       host.next("ROOM_STATE", (message) => message.phase === "LOBBY"),
       rival.next("ROOM_STATE", (message) => message.phase === "LOBBY"),
     ]);
+
+    host.sendRaw({
+      type: "ACTION",
+      envelope: {
+        v: 1,
+      },
+    });
+    await expect(host.next("ERROR")).resolves.toMatchObject({
+      code: "UPGRADE_REQUIRED",
+    });
+    expect(host.socket.readyState).toBe(WebSocket.OPEN);
 
     const seeds = new Set<string>();
     const replayIds = new Set<string>();
@@ -287,6 +372,63 @@ describe("real WebSocket duel", () => {
     expect(replayIds.size).toBe(5);
   }, 20_000);
 
+  it("keeps the legacy v1 route only to return UPGRADE_REQUIRED", async () => {
+    const base = loadConfig({});
+    const app = createApp({
+      logger: false,
+      config: {
+        ...base,
+        allowedOrigins: new Set(["http://127.0.0.1:5173"]),
+        duelExperimentEnabled: true,
+      },
+    });
+    apps.push(app);
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected an ephemeral TCP address");
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const guest = await createGuest(baseUrl, "Legacy");
+    const roomResponse = await fetch(`${baseUrl}/api/v1/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ guestToken: guest.guestToken }),
+    });
+    const room = await roomResponse.json() as { ticket: string };
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/realtime/v1`,
+      { origin: "http://127.0.0.1:5173" },
+    );
+    const message = new Promise<WireMessage>((resolve, reject) => {
+      socket.once("message", (data) =>
+        resolve(JSON.parse(data.toString()) as WireMessage),
+      );
+      socket.once("error", reject);
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    socket.send(JSON.stringify({
+      type: "HELLO",
+      v: 1,
+      ticket: room.ticket,
+    }));
+
+    await expect(message).resolves.toMatchObject({
+      type: "ERROR",
+      code: "UPGRADE_REQUIRED",
+    });
+    await new Promise<void>((resolve) => {
+      if (socket.readyState === WebSocket.CLOSED) {
+        resolve();
+        return;
+      }
+      socket.once("close", () => resolve());
+    });
+  });
+
   it("closes an authenticated connection that floods realtime messages", async () => {
     const base = loadConfig({});
     const app = createApp({
@@ -294,6 +436,7 @@ describe("real WebSocket duel", () => {
       config: {
         ...base,
         allowedOrigins: new Set(["http://127.0.0.1:5173"]),
+        duelExperimentEnabled: true,
       },
     });
     apps.push(app);
@@ -311,7 +454,7 @@ describe("real WebSocket duel", () => {
     });
     const room = await roomResponse.json() as { ticket: string };
     const client = await TestClient.connect(
-      `ws://127.0.0.1:${address.port}/realtime/v1`,
+      `ws://127.0.0.1:${address.port}/realtime/v2`,
       room.ticket,
     );
     clients.push(client);

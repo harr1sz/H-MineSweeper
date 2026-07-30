@@ -1,15 +1,16 @@
 import {
   CELL_FLAGGED,
-  METRIC_RULES_VERSION,
   calculate3BV,
   calculate3BVPerSecond,
   calculateCPS,
+  calculateGameMetrics,
   calculateIOE,
   chordCell,
   countBoardActions,
   createBoard,
   createGameState,
   getProgress,
+  hashBoard,
   isProvablySafeCell,
   revealCell,
   toggleFlag,
@@ -40,6 +41,25 @@ import {
   type SoloPreset,
 } from "../lib/solo";
 import {
+  SOLO_GAME_RULES_VERSION,
+  SOLO_METRIC_RULES_VERSION,
+  SOLO_RUN_SCHEMA_VERSION,
+  createIndexedDbSoloHistoryStore,
+  recordTrainingSessionTerminal,
+  touchTrainingSession,
+  type SoloHistoryCapacity,
+  type SoloHistoryStore,
+  type SoloRunRecordV1,
+} from "../lib/solo-history";
+import {
+  SOLO_PREFERENCES_SCHEMA_VERSION,
+  loadSoloPreferences,
+  resolveSoloLaunchPreferences,
+  saveSoloPreferences,
+  type SoloPreferencesV1,
+} from "../lib/solo-preferences";
+import { percentile } from "../lib/performance";
+import {
   CanvasBoard,
   type BoardAction,
   type BoardActionVisual,
@@ -47,6 +67,8 @@ import {
   type BoardInputMeta,
   type BoardTheme,
 } from "./CanvasBoard";
+import { SoloHistory } from "./SoloHistory";
+import { useTelemetry } from "./TelemetryPrivacy";
 import "./solo-game.css";
 
 interface SoloGameProps {
@@ -59,10 +81,43 @@ interface SoloGameProps {
 type SoloStatus = "READY" | "GENERATING" | "PLAYING" | "WON" | "LOST";
 type StatsLevel = "basic" | "advanced" | "analysis";
 
-const SOLO_STATS_LEVEL_KEY = "hms-solo-stats-level";
-const SOLO_BOARD_THEME_KEY = "hms-solo-board-theme";
-const SOLO_PERSONAL_BEST_PREFIX = "hms-solo-best-v1";
 const EMPTY_ACTION_BREAKDOWN = countBoardActions([]);
+export const SOLO_EFFECTIVE_INTERACTION_IDLE_CAP_MS = 30_000;
+
+export interface SoloRunIdentity {
+  readonly runId: string;
+  readonly trainingSessionId: string;
+}
+
+export function createSoloRunIdentity(
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined =
+    globalThis.sessionStorage,
+  now = Date.now(),
+  createRunId: () => string = () => globalThis.crypto.randomUUID(),
+): SoloRunIdentity {
+  return Object.freeze({
+    runId: createRunId(),
+    trainingSessionId: touchTrainingSession(storage, now),
+  });
+}
+
+export function cappedEffectiveInteractionGapMs(
+  previousAt: number | null,
+  currentAt: number,
+  idleCapMs = SOLO_EFFECTIVE_INTERACTION_IDLE_CAP_MS,
+): number {
+  if (
+    previousAt === null ||
+    !Number.isFinite(previousAt) ||
+    !Number.isFinite(currentAt) ||
+    !Number.isFinite(idleCapMs) ||
+    currentAt <= previousAt ||
+    idleCapMs <= 0
+  ) {
+    return 0;
+  }
+  return Math.min(currentAt - previousAt, idleCapMs);
+}
 
 function appendActionBreakdown(
   current: ActionCountBreakdown,
@@ -85,18 +140,6 @@ function appendActionBreakdown(
   };
 }
 
-function readStatsLevel(): StatsLevel {
-  const value = window.localStorage.getItem(SOLO_STATS_LEVEL_KEY);
-  return value === "advanced" || value === "analysis" ? value : "basic";
-}
-
-function readBoardTheme(): BoardTheme {
-  const value = window.localStorage.getItem(SOLO_BOARD_THEME_KEY);
-  return value === "classic" || value === "high-contrast"
-    ? value
-    : "black-gold";
-}
-
 function formatMetric(value: number | null, digits = 2): string {
   return value === null || !Number.isFinite(value)
     ? "—"
@@ -110,23 +153,123 @@ function comboCopy(combo: number): string {
   return "判断上线";
 }
 
-function personalBestKey(config: SoloBoardConfig): string {
-  return `${SOLO_PERSONAL_BEST_PREFIX}:${config.width}x${config.height}:${config.mines}:${config.mode}`;
+export interface PendingHistoryWriteSnapshot {
+  readonly record: SoloRunRecordV1;
+  readonly status: "queued" | "saving" | "failed";
+  readonly error: string | null;
 }
 
-function readPersonalBest(config: SoloBoardConfig): number | null {
-  const raw = window.localStorage.getItem(personalBestKey(config));
-  if (raw === null) return null;
-  try {
-    const parsed = JSON.parse(raw) as { elapsedMs?: unknown };
-    return typeof parsed.elapsedMs === "number" &&
-      Number.isFinite(parsed.elapsedMs) &&
-      parsed.elapsedMs > 0
-      ? parsed.elapsedMs
-      : null;
-  } catch {
-    return null;
+interface PendingHistoryWriteEntry {
+  readonly record: SoloRunRecordV1;
+  status: PendingHistoryWriteSnapshot["status"];
+  error: string | null;
+  attempt: Promise<PendingHistoryWriteResult> | undefined;
+}
+
+export type PendingHistoryWriteResult =
+  | {
+      readonly ok: true;
+      readonly capacity: SoloHistoryCapacity;
+    }
+  | {
+      readonly ok: false;
+      readonly cause: unknown;
+    };
+
+const pendingHistoryWrites = new Map<string, PendingHistoryWriteEntry>();
+const pendingHistoryListeners = new Set<() => void>();
+let pendingHistoryVersion = 0;
+
+function immutableHistoryRecord(
+  record: SoloRunRecordV1,
+): SoloRunRecordV1 {
+  return Object.freeze({
+    ...record,
+    config: Object.freeze({ ...record.config }),
+    board: Object.freeze({ ...record.board }),
+    rules: Object.freeze({ ...record.rules }),
+    metrics: Object.freeze({ ...record.metrics }),
+  });
+}
+
+function notifyPendingHistoryChange(): void {
+  pendingHistoryVersion += 1;
+  for (const listener of pendingHistoryListeners) listener();
+}
+
+function subscribePendingHistory(listener: () => void): () => void {
+  pendingHistoryListeners.add(listener);
+  return () => pendingHistoryListeners.delete(listener);
+}
+
+export function enqueuePendingHistoryRecord(
+  record: SoloRunRecordV1,
+): SoloRunRecordV1 {
+  const existing = pendingHistoryWrites.get(record.recordId);
+  if (existing) return existing.record;
+  const immutable = immutableHistoryRecord(record);
+  pendingHistoryWrites.set(record.recordId, {
+    record: immutable,
+    status: "queued",
+    error: null,
+    attempt: undefined,
+  });
+  notifyPendingHistoryChange();
+  return immutable;
+}
+
+export function attemptPendingHistoryWrite(
+  recordId: string,
+  store: Pick<SoloHistoryStore, "put">,
+): Promise<PendingHistoryWriteResult> {
+  const entry = pendingHistoryWrites.get(recordId);
+  if (!entry) {
+    return Promise.resolve({
+      ok: false,
+      cause: new Error(`Pending history record ${recordId} does not exist`),
+    });
   }
+  if (entry.status === "saving" && entry.attempt) return entry.attempt;
+
+  entry.status = "saving";
+  entry.error = null;
+  const attempt = (async (): Promise<PendingHistoryWriteResult> => {
+    try {
+      const capacity = await store.put(entry.record);
+      if (pendingHistoryWrites.get(recordId) === entry) {
+        pendingHistoryWrites.delete(recordId);
+        notifyPendingHistoryChange();
+      }
+      return { ok: true, capacity };
+    } catch (cause: unknown) {
+      if (pendingHistoryWrites.get(recordId) === entry) {
+        entry.status = "failed";
+        entry.error =
+          cause instanceof Error
+            ? cause.message
+            : "本局成绩未能写入本地历史。";
+        entry.attempt = undefined;
+        notifyPendingHistoryChange();
+      }
+      return { ok: false, cause };
+    }
+  })();
+  entry.attempt = attempt;
+  notifyPendingHistoryChange();
+  return attempt;
+}
+
+export function getPendingHistoryWrites(): readonly PendingHistoryWriteSnapshot[] {
+  return Array.from(pendingHistoryWrites.values(), ({ record, status, error }) => ({
+    record,
+    status,
+    error,
+  }));
+}
+
+export function resetPendingHistoryWritesForTests(): void {
+  pendingHistoryWrites.clear();
+  notifyPendingHistoryChange();
 }
 
 const DEFAULT_CONFIG: SoloBoardConfig = {
@@ -161,20 +304,41 @@ function applyFlagsByIndex(
   }
 }
 
+function classifyHistoryFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (
+    message.includes("10,000") ||
+    message.includes("容量") ||
+    message.includes("quota")
+  ) {
+    return "QUOTA";
+  }
+  if (message.includes("序列化") || message.includes("schema")) {
+    return "SERIALIZATION";
+  }
+  return "STORAGE";
+}
+
 export function SoloGame({
   effectsProfile,
-  initialGenerationMode = "classic",
+  initialGenerationMode,
   reducedMotion,
   onExit,
 }: SoloGameProps) {
-  const pendingSeedRef = useRef(createSoloSeed());
-  const initialConfig = useMemo<SoloBoardConfig>(
-    () => ({ ...DEFAULT_CONFIG, mode: initialGenerationMode }),
-    [initialGenerationMode],
+  const { flush: flushTelemetry, track } = useTelemetry();
+  const preferenceLoadRef = useRef(loadSoloPreferences());
+  const restoredPreferences = preferenceLoadRef.current.preferences;
+  const launchPreferences = resolveSoloLaunchPreferences(
+    restoredPreferences,
+    initialGenerationMode,
   );
+  const launchMode = launchPreferences.config.mode;
+  const initialConfig = launchPreferences.config;
+  const initialPreset = launchPreferences.preset;
+  const pendingSeedRef = useRef(createSoloSeed());
   const initialGame = useMemo(
     () => createPendingSoloGame(initialConfig, pendingSeedRef.current),
-    [initialConfig],
+    [],
   );
   const gameRef = useRef(initialGame);
   const workerRef = useRef<Worker | null>(null);
@@ -184,13 +348,21 @@ export function SoloGame({
   const lastComboAtRef = useRef<number | null>(null);
   const comboTimeoutRef = useRef<number | null>(null);
   const actionTraceRef = useRef<CountedBoardAction[]>([]);
+  const historyStoreRef = useRef(createIndexedDbSoloHistoryStore());
+  const runIdentityRef = useRef<SoloRunIdentity | null>(null);
+  const runCompletedAtRef = useRef<number | null>(null);
+  const historyEnqueuedRunRef = useRef("");
+  const lastEffectiveInteractionAtRef = useRef<number | null>(null);
+  const effectiveInteractionAccumulatedMsRef = useRef(0);
+  const runEffectiveInteractionMsRef = useRef(0);
+  const inputLatencySamplesRef = useRef<number[]>([]);
+  const mountedRef = useRef(true);
 
   const [game, setGame] = useState(initialGame);
   const [revision, setRevision] = useState(0);
   const [config, setConfig] = useState<SoloBoardConfig>(initialConfig);
-  const [preset, setPreset] = useState<SoloPreset>("beginner");
-  const [mode, setMode] =
-    useState<SoloGenerationMode>(initialGenerationMode);
+  const [preset, setPreset] = useState<SoloPreset>(initialPreset);
+  const [mode, setMode] = useState<SoloGenerationMode>(launchMode);
   const [status, setStatus] = useState<SoloStatus>("READY");
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
@@ -200,31 +372,63 @@ export function SoloGame({
   const [board3BV, setBoard3BV] = useState<number | null>(null);
   const [actionVisual, setActionVisual] = useState<BoardActionVisual>();
   const [combo, setCombo] = useState(0);
-  const [statsLevel, setStatsLevel] = useState<StatsLevel>(readStatsLevel);
-  const [boardTheme, setBoardTheme] = useState<BoardTheme>(readBoardTheme);
-  const [personalBestMs, setPersonalBestMs] = useState<number | null>(() =>
-    readPersonalBest(initialConfig),
+  const [statsLevel, setStatsLevel] = useState<StatsLevel>(
+    launchPreferences.statsLevel,
   );
+  const [boardTheme, setBoardTheme] = useState<BoardTheme>(
+    launchPreferences.boardTheme,
+  );
+  const [legacyPersonalBestMs, setLegacyPersonalBestMs] =
+    useState<number | null>(null);
+  const [currentRulesPersonalBestMs, setCurrentRulesPersonalBestMs] =
+    useState<number | null>(null);
   const [isNewPersonalBest, setIsNewPersonalBest] = useState(false);
   const [coarsePointer] = useState(
     () => window.matchMedia("(pointer: coarse)").matches,
   );
   const [notice, setNotice] = useState(
-    initialGenerationMode === "no_guess"
+    preferenceLoadRef.current.error ??
+      (launchMode === "no_guess"
       ? "首击后后台生成可逻辑解出的无猜棋盘，最多尝试 50 次或 5 秒。"
-      : "任意位置首击，周围 3×3 保证安全。",
+      : "任意位置首击，周围 3×3 保证安全。"),
   );
   const [seed, setSeed] = useState("");
   const [boardHash, setBoardHash] = useState("");
   const [generationSummary, setGenerationSummary] = useState("");
-  const [draftWidth, setDraftWidth] = useState("20");
-  const [draftHeight, setDraftHeight] = useState("16");
-  const [draftMines, setDraftMines] = useState("60");
+  const [draftWidth, setDraftWidth] = useState(String(initialConfig.width));
+  const [draftHeight, setDraftHeight] = useState(String(initialConfig.height));
+  const [draftMines, setDraftMines] = useState(String(initialConfig.mines));
+  const [pendingWriteVersion, setPendingWriteVersion] = useState(
+    pendingHistoryVersion,
+  );
+  const handleCurrentBestChange = useCallback((elapsed: number | null) => {
+    setCurrentRulesPersonalBestMs(elapsed);
+  }, []);
+  const handleLegacyPersonalBestChange = useCallback(
+    (elapsed: number | null) => {
+      setLegacyPersonalBestMs(elapsed);
+    },
+    [],
+  );
 
   const replaceGame = useCallback((next: GameState) => {
     gameRef.current = next;
     setGame(next);
     setRevision((value) => value + 1);
+  }, []);
+
+  const recordEffectiveInteraction = useCallback((now: number): number => {
+    if (document.visibilityState !== "visible") {
+      lastEffectiveInteractionAtRef.current = null;
+      return effectiveInteractionAccumulatedMsRef.current;
+    }
+    effectiveInteractionAccumulatedMsRef.current +=
+      cappedEffectiveInteractionGapMs(
+        lastEffectiveInteractionAtRef.current,
+        now,
+      );
+    lastEffectiveInteractionAtRef.current = now;
+    return effectiveInteractionAccumulatedMsRef.current;
   }, []);
 
   const clearCombo = useCallback(() => {
@@ -247,19 +451,46 @@ export function SoloGame({
   }, []);
 
   useEffect(
-    () => () => {
-      cancelGeneration();
-      if (comboTimeoutRef.current !== null) {
-        window.clearTimeout(comboTimeoutRef.current);
-      }
+    () => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+        cancelGeneration();
+        if (comboTimeoutRef.current !== null) {
+          window.clearTimeout(comboTimeoutRef.current);
+        }
+      };
     },
     [cancelGeneration],
+  );
+
+  useEffect(
+    () =>
+      subscribePendingHistory(() => {
+        setPendingWriteVersion(pendingHistoryVersion);
+      }),
+    [],
   );
 
   useEffect(() => {
     if (status !== "PLAYING") return;
     const timer = window.setInterval(() => setClockNow(performance.now()), 50);
     return () => window.clearInterval(timer);
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "PLAYING") return;
+    const updateInteractionAnchor = () => {
+      if (document.visibilityState === "visible") {
+        lastEffectiveInteractionAtRef.current ??= performance.now();
+      } else {
+        lastEffectiveInteractionAtRef.current = null;
+      }
+    };
+    updateInteractionAnchor();
+    document.addEventListener("visibilitychange", updateInteractionAnchor);
+    return () =>
+      document.removeEventListener("visibilitychange", updateInteractionAnchor);
   }, [status]);
 
   const resetBoard = useCallback(
@@ -282,11 +513,19 @@ export function SoloGame({
       setFinishedAt(null);
       setClockNow(performance.now());
       actionTraceRef.current = [];
+      runIdentityRef.current = null;
+      runCompletedAtRef.current = null;
+      historyEnqueuedRunRef.current = "";
+      lastEffectiveInteractionAtRef.current = null;
+      effectiveInteractionAccumulatedMsRef.current = 0;
+      runEffectiveInteractionMsRef.current = 0;
+      inputLatencySamplesRef.current = [];
       setActionBreakdown(EMPTY_ACTION_BREAKDOWN);
       setBoard3BV(null);
       setActionVisual(undefined);
       clearCombo();
-      setPersonalBestMs(readPersonalBest(nextConfig));
+      setLegacyPersonalBestMs(null);
+      setCurrentRulesPersonalBestMs(null);
       setIsNewPersonalBest(false);
       setSeed("");
       setBoardHash("");
@@ -308,6 +547,10 @@ export function SoloGame({
       }
       setFinishedAt(completedAt);
       setClockNow(completedAt);
+      runCompletedAtRef.current = Date.now();
+      lastEffectiveInteractionAtRef.current = null;
+      runEffectiveInteractionMsRef.current =
+        effectiveInteractionAccumulatedMsRef.current;
       setStatus(next.outcome === "WON" ? "WON" : "LOST");
       setNotice(
         next.outcome === "WON"
@@ -396,7 +639,6 @@ export function SoloGame({
       firstIndex: number,
       flaggedIndexes: readonly number[],
       options: {
-        readonly boardHash?: string;
         readonly generation?: string;
         readonly physicalClicks?: number;
       } = {},
@@ -404,14 +646,31 @@ export function SoloGame({
       const next = createGameState(createBoard(spec));
       applyFlagsByIndex(flaggedIndexes, next);
       const beganAt = performance.now();
+      const nextRunIdentity = createSoloRunIdentity();
+      runIdentityRef.current = nextRunIdentity;
+      runCompletedAtRef.current = null;
+      historyEnqueuedRunRef.current = "";
+      effectiveInteractionAccumulatedMsRef.current = 0;
+      lastEffectiveInteractionAtRef.current =
+        document.visibilityState === "visible" ? beganAt : null;
+      runEffectiveInteractionMsRef.current = 0;
       const delta = revealCell(next, firstIndex);
       setStartedAt(beganAt);
       setFinishedAt(null);
       setClockNow(beganAt);
       setSeed(spec.seed);
-      setBoardHash(options.boardHash ?? "");
+      const calculatedBoardHash = hashBoard(next.board);
+      setBoardHash(calculatedBoardHash);
       setGenerationSummary(options.generation ?? "");
       setBoard3BV(calculate3BV(next.board).value);
+      track("solo_run_started", {
+        trainingSessionId: nextRunIdentity.trainingSessionId,
+        preset,
+        generationMode: config.mode,
+        width: config.width,
+        height: config.height,
+        mines: config.mines,
+      });
       replaceGame(next);
       finishIfTerminal(next, beganAt);
       recordAction(
@@ -423,7 +682,7 @@ export function SoloGame({
       );
       return next.outcome;
     },
-    [finishIfTerminal, recordAction, replaceGame],
+    [config, finishIfTerminal, preset, recordAction, replaceGame, track],
   );
 
   const generateNoGuess = useCallback(
@@ -434,6 +693,7 @@ export function SoloGame({
     ) => {
       cancelGeneration();
       const requestId = workerRequestRef.current;
+      const generationStartedAt = performance.now();
       setStatus("GENERATING");
       setNotice("正在后台寻找无猜棋盘，计时尚未开始…");
 
@@ -446,6 +706,13 @@ export function SoloGame({
       } catch {
         setStatus("READY");
         setNotice("无猜生成器无法启动，请检查浏览器安全策略或改用经典随机。");
+        track("no_guess_generation_finished", {
+          preset,
+          success: false,
+          attempts: 0,
+          elapsedMs: performance.now() - generationStartedAt,
+          failureReason: "GENERATION_ERROR",
+        });
         return;
       }
       workerRef.current = worker;
@@ -457,7 +724,7 @@ export function SoloGame({
         maxDurationMs: 5_000,
       };
 
-      const fail = (message: string) => {
+      const fail = (message: string, failureReason: string) => {
         if (requestId !== workerRequestRef.current) return;
         worker.terminate();
         workerRef.current = null;
@@ -467,6 +734,13 @@ export function SoloGame({
         }
         setStatus("READY");
         setNotice(message);
+        track("no_guess_generation_finished", {
+          preset,
+          success: false,
+          attempts: 0,
+          elapsedMs: performance.now() - generationStartedAt,
+          failureReason,
+        });
       };
 
       worker.onmessage = (event: MessageEvent<NoGuessWorkerResponse>) => {
@@ -487,14 +761,26 @@ export function SoloGame({
           setNotice(
             "在 50 次尝试内没有找到无猜棋盘，请调整尺寸、雷数或改用经典随机。",
           );
+          track("no_guess_generation_finished", {
+            preset,
+            success: false,
+            attempts: event.data.attempts,
+            elapsedMs: event.data.elapsedMs,
+            failureReason: "ATTEMPT_LIMIT",
+          });
           return;
         }
+        track("no_guess_generation_finished", {
+          preset,
+          success: true,
+          attempts: event.data.attempts,
+          elapsedMs: event.data.elapsedMs,
+        });
         const outcome = beginGame(
           event.data.spec,
           firstIndex,
           flaggedIndexes,
           {
-            boardHash: event.data.boardHash,
             generation: `${event.data.attempts} 次尝试 · ${event.data.elapsedMs.toFixed(0)}ms`,
             physicalClicks,
           },
@@ -504,14 +790,20 @@ export function SoloGame({
         }
       };
       worker.onerror = () => {
-        fail("无猜生成器启动失败，请改用经典随机后重试。");
+        fail(
+          "无猜生成器启动失败，请改用经典随机后重试。",
+          "GENERATION_ERROR",
+        );
       };
       workerTimeoutRef.current = window.setTimeout(() => {
-        fail("无猜生成超过 5 秒，请调整尺寸、雷数或改用经典随机。");
+        fail(
+          "无猜生成超过 5 秒，请调整尺寸、雷数或改用经典随机。",
+          "TIME_LIMIT",
+        );
       }, 5_000);
       worker.postMessage(request);
     },
-    [beginGame, cancelGeneration, config],
+    [beginGame, cancelGeneration, config, preset, track],
   );
 
   const handleBoardAction = useCallback(
@@ -574,6 +866,8 @@ export function SoloGame({
       const comboEligible =
         action === "CHORD" ||
         (action === "REVEAL" && isProvablySafeCell(current, cellIndex));
+      const actionAt = performance.now();
+      recordEffectiveInteraction(actionAt);
       const delta =
         action === "REVEAL"
           ? revealCell(current, cellIndex)
@@ -595,13 +889,14 @@ export function SoloGame({
         );
       }
       replaceGame(current);
-      finishIfTerminal(current, performance.now());
+      finishIfTerminal(current, actionAt);
     },
     [
       beginGame,
       config,
       finishIfTerminal,
       generateNoGuess,
+      recordEffectiveInteraction,
       recordAction,
       replaceGame,
       status,
@@ -619,6 +914,7 @@ export function SoloGame({
     setDraftHeight(String(nextConfig.height));
     setDraftMines(String(nextConfig.mines));
     resetBoard(nextConfig, nextPreset);
+    persistPreferences(nextConfig, nextPreset);
   };
 
   const chooseMode = (nextMode: SoloGenerationMode) => {
@@ -629,6 +925,7 @@ export function SoloGame({
       return;
     }
     resetBoard(nextConfig, preset);
+    persistPreferences(nextConfig, preset);
   };
 
   const applyCustom = () => {
@@ -644,6 +941,7 @@ export function SoloGame({
       return;
     }
     resetBoard(nextConfig, "custom");
+    persistPreferences(nextConfig, "custom");
   };
 
   const exitSolo = () => {
@@ -651,15 +949,47 @@ export function SoloGame({
     onExit();
   };
 
+  const persistPreferences = (
+    nextConfig: SoloBoardConfig,
+    nextPreset: SoloPreset,
+    nextStatsLevel: StatsLevel = statsLevel,
+    nextBoardTheme: BoardTheme = boardTheme,
+  ) => {
+    const preferences: SoloPreferencesV1 = {
+      schemaVersion: SOLO_PREFERENCES_SCHEMA_VERSION,
+      preset: nextPreset,
+      config: nextConfig,
+      statsLevel: nextStatsLevel,
+      boardTheme: nextBoardTheme,
+    };
+    try {
+      saveSoloPreferences(preferences);
+      return true;
+    } catch (cause) {
+      setNotice(
+        cause instanceof Error
+          ? cause.message
+          : "单人偏好未能保存；本局可继续。",
+      );
+      return false;
+    }
+  };
+
   const chooseStatsLevel = (next: StatsLevel) => {
     setStatsLevel(next);
-    window.localStorage.setItem(SOLO_STATS_LEVEL_KEY, next);
+    persistPreferences(config, preset, next, boardTheme);
   };
 
   const chooseBoardTheme = (next: BoardTheme) => {
     setBoardTheme(next);
-    window.localStorage.setItem(SOLO_BOARD_THEME_KEY, next);
+    persistPreferences(config, preset, statsLevel, next);
   };
+
+  useEffect(() => {
+    if (initialGenerationMode !== undefined) {
+      persistPreferences(initialConfig, initialPreset);
+    }
+  }, []);
 
   const flags = countFlags(game);
   const elapsedMs =
@@ -677,41 +1007,142 @@ export function SoloGame({
       ? null
       : calculateIOE(board3BV, actionBreakdown.physicalClicks);
   useEffect(() => {
+    const runIdentity = runIdentityRef.current;
     if (
-      status !== "WON" ||
-      elapsedMs <= 0 ||
-      (personalBestMs !== null && elapsedMs >= personalBestMs)
+      (status !== "WON" && status !== "LOST") ||
+      runIdentity === null ||
+      runCompletedAtRef.current === null ||
+      historyEnqueuedRunRef.current === runIdentity.runId
     ) {
       return;
     }
-    window.localStorage.setItem(
-      personalBestKey(config),
-      JSON.stringify({
-        elapsedMs,
-        board3BV,
-        cps,
-        threeBvPerSecond,
-        ioe,
-        physicalClicks: actionBreakdown.physicalClicks,
-        metricRulesVersion: METRIC_RULES_VERSION,
+
+    const { runId, trainingSessionId } = runIdentity;
+    historyEnqueuedRunRef.current = runId;
+    const completedAt = runCompletedAtRef.current;
+    const inputSamples = [...inputLatencySamplesRef.current];
+    const metrics = calculateGameMetrics({
+      board: game.board,
+      elapsedMs,
+      actions: actionTraceRef.current,
+    });
+    const actions = countBoardActions(actionTraceRef.current);
+    const record: SoloRunRecordV1 = {
+      schemaVersion: SOLO_RUN_SCHEMA_VERSION,
+      recordId: runId,
+      trainingSessionId,
+      completedAt: new Date(completedAt).toISOString(),
+      outcome: status,
+      config: {
+        preset,
+        width: config.width,
+        height: config.height,
+        mines: config.mines,
+        generationMode: config.mode,
+      },
+      board: {
+        seed,
+        boardHash,
         trustStatus: "LOCAL_UNVERIFIED",
-        completedAt: Date.now(),
-      }),
+      },
+      rules: {
+        metricRulesVersion: SOLO_METRIC_RULES_VERSION,
+        gameRulesVersion: SOLO_GAME_RULES_VERSION,
+      },
+      metrics: {
+        elapsedMs: metrics.elapsedMs,
+        board3BV: metrics.board3BV,
+        cps: metrics.cps,
+        threeBvPerSecond: metrics.threeBvPerSecond,
+        ioe: metrics.ioe,
+        physicalClicks: metrics.physicalClicks,
+        semanticActions: metrics.semanticActions,
+        acceptedActions: metrics.acceptedActions,
+        wastedActions: metrics.wastedActions,
+        reveals: actions.reveals,
+        flags: actions.flags,
+        unflags: actions.unflags,
+        chords: actions.chords,
+      },
+    };
+
+    enqueuePendingHistoryRecord(record);
+    const runEffectiveInteractionMs = runEffectiveInteractionMsRef.current;
+    const trainingProgress =
+      preset === "custom"
+        ? {
+            terminalBoardCount: 0,
+            effectiveInteractionMs: 0,
+          }
+        : recordTrainingSessionTerminal(
+            trainingSessionId,
+            runEffectiveInteractionMs,
+          );
+    const inputP95Ms = percentile(inputSamples, 0.95);
+    const reportTerminal = (
+      historySaved: boolean,
+      historyFailureReason: string | null,
+    ) => {
+      track("solo_run_terminal", {
+        trainingSessionId,
+        preset,
+        generationMode: config.mode,
+        outcome: status,
+        elapsedMs,
+        terminalBoardCount: trainingProgress.terminalBoardCount,
+        effectiveInteractionMs: trainingProgress.effectiveInteractionMs,
+        runEffectiveInteractionMs,
+        historySaved,
+        historyFailureReason,
+        inputSampleCount: inputSamples.length,
+        inputP95Ms,
+      });
+      void flushTelemetry();
+    };
+
+    void attemptPendingHistoryWrite(runId, historyStoreRef.current).then(
+      (result) => {
+        if (result.ok) {
+          if (
+            mountedRef.current &&
+            runIdentityRef.current?.runId === runId
+          ) {
+            if (
+              status === "WON" &&
+              (currentRulesPersonalBestMs === null ||
+                elapsedMs < currentRulesPersonalBestMs)
+            ) {
+              setCurrentRulesPersonalBestMs(elapsedMs);
+              setIsNewPersonalBest(true);
+            }
+            if (result.capacity.warning) {
+              setNotice(
+                `本局已保存。本地历史容量 ${result.capacity.recordCount.toLocaleString()}/10,000，请及时导出并按需删除。`,
+              );
+            }
+          }
+          reportTerminal(true, null);
+          return;
+        }
+        reportTerminal(false, classifyHistoryFailure(result.cause));
+      },
     );
-    setPersonalBestMs(elapsedMs);
-    setIsNewPersonalBest(true);
   }, [
-    actionBreakdown.physicalClicks,
-    board3BV,
+    boardHash,
     config,
-    cps,
+    currentRulesPersonalBestMs,
     elapsedMs,
-    ioe,
-    personalBestMs,
+    game.board,
+    preset,
+    seed,
     status,
-    threeBvPerSecond,
+    flushTelemetry,
+    track,
   ]);
   const progress = Math.round(getProgress(game) * 100);
+  const failedPendingHistoryWrites = getPendingHistoryWrites().filter(
+    (pending) => pending.status === "failed",
+  );
   const statusLabel =
     status === "READY"
       ? "等待首击"
@@ -725,6 +1156,9 @@ export function SoloGame({
 
   return (
     <section className="solo-shell">
+      <a className="skip-link" href="#solo-board">
+        跳到棋盘
+      </a>
       <div className="solo-header">
         <div>
           <span className="panel-kicker">LOCAL / SINGLE PLAYER</span>
@@ -830,7 +1264,11 @@ export function SoloGame({
       </div>
 
       <div className="solo-game-layout">
-        <div className="board-stage solo-board-stage">
+        <div
+          className="board-stage solo-board-stage"
+          id="solo-board"
+          tabIndex={-1}
+        >
           <div className="board-toolbar">
             <span>左键 REVEAL</span>
             <span>右键 FLAG</span>
@@ -849,6 +1287,11 @@ export function SoloGame({
             revision={revision}
             showTerminalMines
             onAction={handleBoardAction}
+            onInputLatency={(latencyMs) => {
+              if (inputLatencySamplesRef.current.length < 2_000) {
+                inputLatencySamplesRef.current.push(latencyMs);
+              }
+            }}
           />
 
           {combo >= 3 && (
@@ -864,14 +1307,19 @@ export function SoloGame({
 
           {status === "GENERATING" && (
             <div className="solo-generating" aria-live="assertive">
-              <span className="panel-kicker">NG-COMPETITIVE V1</span>
+              <span className="panel-kicker">NO-GUESS GENERATION V1</span>
               <strong>生成无猜棋盘</strong>
               <p>最多 50 次尝试或 5 秒；生成时间不会计入成绩。</p>
             </div>
           )}
 
           {(status === "WON" || status === "LOST") && (
-            <div className="result-overlay">
+            <div
+              className="result-overlay"
+              role="status"
+              aria-live="assertive"
+              aria-atomic="true"
+            >
               <span className="panel-kicker">SINGLE PLAYER RESULT</span>
               <h2>{status === "WON" ? "棋盘完成" : "触雷"}</h2>
               <p>
@@ -909,7 +1357,7 @@ export function SoloGame({
         </div>
 
         <aside className="solo-side-panel">
-          <span className="panel-kicker">RUN TELEMETRY</span>
+          <span className="panel-kicker">RUN METRICS</span>
           <div className="solo-status-line">
             <strong>{statusLabel}</strong>
             <i className={`solo-status-dot status-${status.toLowerCase()}`} />
@@ -959,11 +1407,19 @@ export function SoloGame({
               </strong>
             </div>
             <div>
-              <span>个人最佳</span>
+              <span>当前规则最佳</span>
               <strong>
-                {personalBestMs === null ? "—" : formatSoloTime(personalBestMs)}
+                {currentRulesPersonalBestMs === null
+                  ? "—"
+                  : formatSoloTime(currentRulesPersonalBestMs)}
               </strong>
             </div>
+            {legacyPersonalBestMs !== null && (
+              <div>
+                <span>旧版 PB 参考</span>
+                <strong>{formatSoloTime(legacyPersonalBestMs)}</strong>
+              </div>
+            )}
             <div>
               <span>验证状态</span>
               <strong className="solo-trust-label">LOCAL</strong>
@@ -1062,6 +1518,40 @@ export function SoloGame({
           </button>
         </aside>
       </div>
+      {failedPendingHistoryWrites.map((pending) => (
+        <div
+          className="solo-history-save-error"
+          key={pending.record.recordId}
+          role="alert"
+        >
+          <span>
+            记录 {pending.record.recordId.slice(0, 8)} 保存失败：
+            {pending.error ?? "本局成绩未能写入本地历史。"}
+          </span>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              void attemptPendingHistoryWrite(
+                pending.record.recordId,
+                historyStoreRef.current,
+              );
+            }}
+          >
+            重试保存
+          </button>
+        </div>
+      ))}
+      <SoloHistory
+        config={config}
+        preset={preset}
+        metricRulesVersion={SOLO_METRIC_RULES_VERSION}
+        gameRulesVersion={SOLO_GAME_RULES_VERSION}
+        refreshToken={pendingWriteVersion}
+        store={historyStoreRef.current}
+        onCurrentBestChange={handleCurrentBestChange}
+        onLegacyPersonalBestChange={handleLegacyPersonalBestChange}
+      />
     </section>
   );
 }

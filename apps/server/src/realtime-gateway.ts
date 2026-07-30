@@ -2,6 +2,7 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import type { RawData } from "ws";
+import { PROTOCOL_VERSION } from "@h-minesweeper/game-core";
 import type { ServerConfig } from "./config.js";
 import type { RoomManager } from "./room-manager.js";
 import type { TicketStore } from "./stores.js";
@@ -9,6 +10,7 @@ import type { ClientActionEnvelope, WireSender } from "./types.js";
 
 interface ConnectionContext {
   authenticated: boolean;
+  routeVersion: 1 | 2;
   lastActivityAt: number;
   rateTokens: number;
   rateLastRefillAt: number;
@@ -43,12 +45,16 @@ function hasOnlyKeys(
 
 function isHello(
   value: unknown,
-): value is { readonly type: "HELLO"; readonly v: 1; readonly ticket: string } {
+): value is {
+  readonly type: "HELLO";
+  readonly v: typeof PROTOCOL_VERSION;
+  readonly ticket: string;
+} {
   return (
     isRecord(value) &&
     hasOnlyKeys(value, ["type", "v", "ticket"]) &&
     value.type === "HELLO" &&
-    value.v === 1 &&
+    value.v === PROTOCOL_VERSION &&
     typeof value.ticket === "string" &&
     value.ticket.length >= 20 &&
     value.ticket.length <= 256
@@ -76,6 +82,7 @@ function isClientActionEnvelope(value: unknown): value is ClientActionEnvelope {
       "connectionEpoch",
       "clientActionId",
       "lastServerSeq",
+      "baseStateHash",
       "actionType",
       "cellIndex",
       "clientMonoTelemetry",
@@ -98,7 +105,7 @@ function isClientActionEnvelope(value: unknown): value is ClientActionEnvelope {
       Number(value.cellIndex) < 10_000);
 
   return (
-    value.v === 1 &&
+    value.v === PROTOCOL_VERSION &&
     typeof value.matchId === "string" &&
     value.matchId.length >= 1 &&
     value.matchId.length <= 128 &&
@@ -109,6 +116,9 @@ function isClientActionEnvelope(value: unknown): value is ClientActionEnvelope {
     value.clientActionId.length <= 128 &&
     Number.isSafeInteger(value.lastServerSeq) &&
     Number(value.lastServerSeq) >= 0 &&
+    typeof value.baseStateHash === "string" &&
+    value.baseStateHash.length >= 1 &&
+    value.baseStateHash.length <= 128 &&
     actionTypeValid &&
     cellIndexValid &&
     typeof value.clientMonoTelemetry === "number" &&
@@ -181,7 +191,9 @@ export class RealtimeGateway {
       this.handleUpgrade(request, socket, head);
     };
     this.server.on("upgrade", this.#upgradeListener);
-    this.#wss.on("connection", (socket) => this.handleConnection(socket));
+    this.#wss.on("connection", (socket, request) =>
+      this.handleConnection(socket, request),
+    );
     this.#heartbeatTimer = setInterval(
       () => this.heartbeat(),
       this.config.heartbeatIntervalMs,
@@ -215,7 +227,12 @@ export class RealtimeGateway {
       rejectUpgrade(socket, 503, "Service Unavailable");
       return;
     }
-    if (websocketPath(request) !== "/realtime/v1") {
+    const path = websocketPath(request);
+    if (path !== "/realtime/v1" && path !== "/realtime/v2") {
+      rejectUpgrade(socket, 404, "Not Found");
+      return;
+    }
+    if (!this.config.duelExperimentEnabled) {
       rejectUpgrade(socket, 404, "Not Found");
       return;
     }
@@ -231,9 +248,13 @@ export class RealtimeGateway {
     });
   }
 
-  private handleConnection(socket: WebSocket): void {
+  private handleConnection(
+    socket: WebSocket,
+    request: IncomingMessage,
+  ): void {
     const context: ConnectionContext = {
       authenticated: false,
+      routeVersion: websocketPath(request) === "/realtime/v1" ? 1 : 2,
       lastActivityAt: this.now(),
       rateTokens: MESSAGE_BURST,
       rateLastRefillAt: this.now(),
@@ -290,7 +311,33 @@ export class RealtimeGateway {
     }
 
     if (!context.authenticated) {
+      if (context.routeVersion === 1) {
+        this.send(socket, {
+          type: "ERROR",
+          v: PROTOCOL_VERSION,
+          code: "UPGRADE_REQUIRED",
+          message: "旧版实时入口已停用，请刷新或升级客户端。",
+          retryable: false,
+        });
+        socket.close(4406, "Upgrade required");
+        return;
+      }
       if (!isHello(message)) {
+        if (
+          isRecord(message) &&
+          message.type === "HELLO" &&
+          message.v !== PROTOCOL_VERSION
+        ) {
+          this.send(socket, {
+            type: "ERROR",
+            v: PROTOCOL_VERSION,
+            code: "UPGRADE_REQUIRED",
+            message: "客户端协议版本过旧，请刷新或升级后重试。",
+            retryable: false,
+          });
+          socket.close(4406, "Upgrade required");
+          return;
+        }
         socket.close(4401, "HELLO must be the first message");
         return;
       }
@@ -303,14 +350,30 @@ export class RealtimeGateway {
     if (isPing(message)) {
       this.send(socket, {
         type: "PONG",
-        v: 1,
+        v: PROTOCOL_VERSION,
         at: message.at,
         serverTime: this.now(),
       });
       return;
     }
     if (!isAction(message)) {
-      socket.close(4400, "Invalid protocol message");
+      const envelope =
+        isRecord(message) && isRecord(message.envelope)
+          ? message.envelope
+          : undefined;
+      const unsupportedVersion =
+        envelope?.v !== undefined && envelope.v !== PROTOCOL_VERSION;
+      this.send(socket, {
+        type: "ERROR",
+        v: PROTOCOL_VERSION,
+        code: unsupportedVersion
+          ? "UPGRADE_REQUIRED"
+          : "INVALID_PROTOCOL_MESSAGE",
+        message: unsupportedVersion
+          ? "客户端协议版本过旧，请刷新或升级后重试。"
+          : "Invalid realtime protocol message",
+        retryable: false,
+      });
       return;
     }
 
@@ -397,7 +460,7 @@ export class RealtimeGateway {
     } else {
       this.send(socket, {
         type: "ERROR",
-        v: 1,
+        v: PROTOCOL_VERSION,
         code: "RATE_LIMITED",
         message: "Too many realtime messages",
         retryable: true,

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import {
+  PROTOCOL_VERSION,
   PROTOTYPE_EXPERT_SEEDS,
   chordCell,
   createBoard,
@@ -25,7 +26,6 @@ import type {
   WireSender,
 } from "./types.js";
 
-const PROTOCOL_VERSION = 1 as const;
 const MAX_EVENT_RING = 256;
 const MAX_ACTION_CACHE = 2_048;
 const MAX_ACTIONS_PER_PLAYER_PER_MATCH = 50_000;
@@ -50,13 +50,16 @@ export interface RoomActorOptions {
   readonly timings: RoomActorTimings;
   readonly now?: () => number;
   readonly boardSpecs?: readonly BoardSpec[];
+  readonly maxReplayEvents?: number;
+  readonly maxReplayBytes?: number;
 }
 
 interface CachedActionResult {
   readonly accepted: boolean;
   readonly rejectReason?: string;
   readonly delta?: RevealDelta;
-  readonly stateHash: string;
+  readonly authoritativeStateHash: string;
+  readonly reconcile: "NONE" | "ROLLBACK" | "SNAPSHOT_REQUIRED";
 }
 
 interface PlayerRuntime {
@@ -139,13 +142,17 @@ export class RoomActor {
   #progressTimer: NodeJS.Timeout | undefined;
   #rematchTimer: NodeJS.Timeout | undefined;
   #lastProgressAt = Number.NEGATIVE_INFINITY;
+  #progressSeq = 0;
   #lastActivityAt: number;
   #replaySeq = 0;
+  #replayBytes = 0;
   readonly #players = new Map<string, PlayerRuntime>();
   readonly #replays = new Map<string, ReplayDocument>();
   readonly #boardSpecs: readonly BoardSpec[];
   readonly #timings: RoomActorTimings;
   readonly #now: () => number;
+  readonly #maxReplayEvents: number;
+  readonly #maxReplayBytes: number;
 
   constructor(options: RoomActorOptions) {
     this.roomId = options.roomId;
@@ -153,6 +160,8 @@ export class RoomActor {
     this.#hostGuestId = options.host.guestId;
     this.#timings = options.timings;
     this.#now = options.now ?? Date.now;
+    this.#maxReplayEvents = options.maxReplayEvents ?? 10_000;
+    this.#maxReplayBytes = options.maxReplayBytes ?? 5 * 1024 * 1024;
     this.#lastActivityAt = this.#now();
     this.#boardSpecs =
       options.boardSpecs && options.boardSpecs.length > 0
@@ -297,35 +306,94 @@ export class RoomActor {
     this.#lastActivityAt = this.#now();
 
     if (envelope.connectionEpoch !== player.connectionEpoch) {
-      this.rejectAction(player, envelope.clientActionId, "STALE_CONNECTION");
+      this.rejectAction(
+        player,
+        envelope.clientActionId,
+        "STALE_CONNECTION",
+        "SNAPSHOT_REQUIRED",
+      );
+      this.sendSnapshot(player);
       return;
     }
     if (envelope.matchId !== this.#matchId) {
-      this.rejectAction(player, envelope.clientActionId, "MATCH_MISMATCH");
+      this.rejectAction(
+        player,
+        envelope.clientActionId,
+        "MATCH_MISMATCH",
+        "SNAPSHOT_REQUIRED",
+      );
+      this.sendSnapshot(player);
       return;
     }
     if (envelope.lastServerSeq > player.streamSeq) {
-      this.rejectAction(player, envelope.clientActionId, "INVALID_SERVER_SEQ");
+      this.rejectAction(
+        player,
+        envelope.clientActionId,
+        "INVALID_SERVER_SEQ",
+        "SNAPSHOT_REQUIRED",
+      );
+      this.sendSnapshot(player);
       return;
     }
 
-    this.catchUp(player, envelope.lastServerSeq);
+    if (!this.catchUp(player, envelope.lastServerSeq)) {
+      this.rejectAction(
+        player,
+        envelope.clientActionId,
+        "SNAPSHOT_REQUIRED",
+        "SNAPSHOT_REQUIRED",
+        this.actionBaseStateHash(player, envelope.actionType),
+      );
+      this.sendSnapshot(player);
+      return;
+    }
 
     const cached = player.actionCache.get(envelope.clientActionId);
     if (cached) {
       this.emitActionResult(player, envelope.clientActionId, cached, true);
+      if (cached.reconcile !== "NONE") {
+        this.sendSnapshot(player);
+      }
       return;
     }
     if (player.seenActionIds.has(envelope.clientActionId)) {
+      const boardAction = this.isBoardAction(envelope.actionType);
       this.rejectAction(
         player,
         envelope.clientActionId,
         "DUPLICATE_ACTION",
+        boardAction ? "ROLLBACK" : "NONE",
+        this.actionBaseStateHash(player, envelope.actionType),
       );
+      if (boardAction) this.sendSnapshot(player);
       return;
     }
     if (player.seenActionIds.size >= MAX_ACTIONS_PER_PLAYER_PER_MATCH) {
-      this.rejectAction(player, envelope.clientActionId, "ACTION_LIMIT");
+      const boardAction = this.isBoardAction(envelope.actionType);
+      this.rejectAction(
+        player,
+        envelope.clientActionId,
+        "ACTION_LIMIT",
+        boardAction ? "ROLLBACK" : "NONE",
+        this.actionBaseStateHash(player, envelope.actionType),
+      );
+      if (boardAction) this.sendSnapshot(player);
+      return;
+    }
+    const boardAction = this.isBoardAction(envelope.actionType);
+    const expectedBaseStateHash = this.actionBaseStateHash(
+      player,
+      envelope.actionType,
+    );
+    if (boardAction && envelope.baseStateHash !== expectedBaseStateHash) {
+      this.rejectAndCache(
+        player,
+        envelope.clientActionId,
+        "BASE_STATE_MISMATCH",
+        "SNAPSHOT_REQUIRED",
+        expectedBaseStateHash,
+      );
+      this.sendSnapshot(player);
       return;
     }
 
@@ -372,10 +440,12 @@ export class RoomActor {
     player.ready = true;
     const result: CachedActionResult = {
       accepted: true,
-      stateHash: this.hashRoomState(),
+      authoritativeStateHash: this.hashRoomState(),
+      reconcile: "NONE",
     };
     this.cacheAndEmit(player, clientActionId, result);
     this.record("READY", player.guest.guestId, {});
+    if (this.currentReplayUnavailable()) return;
     this.broadcastRoomState();
 
     if ([...this.#players.values()].every((candidate) => candidate.ready)) {
@@ -400,10 +470,12 @@ export class RoomActor {
     this.#phase = "REMATCH";
     const result: CachedActionResult = {
       accepted: true,
-      stateHash: this.hashRoomState(),
+      authoritativeStateHash: this.hashRoomState(),
+      reconcile: "NONE",
     };
     this.cacheAndEmit(player, clientActionId, result);
     this.record("REMATCH_REQUESTED", player.guest.guestId, {});
+    if (this.currentReplayUnavailable()) return;
     this.broadcastRoomState();
 
     if ([...this.#players.values()].every((candidate) => candidate.rematch)) {
@@ -422,18 +494,39 @@ export class RoomActor {
     envelope: ClientActionEnvelope,
   ): void {
     if (this.#phase !== "ACTIVE" || !player.game || player.terminal) {
-      this.rejectAndCache(player, envelope.clientActionId, "INVALID_PHASE");
+      this.rejectAndCache(
+        player,
+        envelope.clientActionId,
+        "INVALID_PHASE",
+        "ROLLBACK",
+        player.game ? hashGameState(player.game) : this.hashRoomState(),
+      );
+      this.sendSnapshot(player);
       return;
     }
     if (
       envelope.cellIndex === undefined ||
       !Number.isSafeInteger(envelope.cellIndex)
     ) {
-      this.rejectAndCache(player, envelope.clientActionId, "CELL_REQUIRED");
+      this.rejectAndCache(
+        player,
+        envelope.clientActionId,
+        "CELL_REQUIRED",
+        "ROLLBACK",
+        hashGameState(player.game),
+      );
+      this.sendSnapshot(player);
       return;
     }
     if (this.#deadline !== undefined && this.#now() >= this.#deadline) {
-      this.rejectAndCache(player, envelope.clientActionId, "ROUND_EXPIRED");
+      this.rejectAndCache(
+        player,
+        envelope.clientActionId,
+        "ROUND_EXPIRED",
+        "ROLLBACK",
+        hashGameState(player.game),
+      );
+      this.sendSnapshot(player);
       this.settleTimeout();
       return;
     }
@@ -455,7 +548,8 @@ export class RoomActor {
         ? {}
         : { rejectReason: delta.rejectReason }),
       delta,
-      stateHash: delta.stateHash,
+      authoritativeStateHash: delta.stateHash,
+      reconcile: "NONE",
     };
     this.cacheAndEmit(player, envelope.clientActionId, result);
     this.record("ACTION", player.guest.guestId, {
@@ -470,6 +564,7 @@ export class RoomActor {
       serverStateHash: delta.stateHash,
     });
 
+    if (this.#phase !== "ACTIVE") return;
     if (!delta.accepted) return;
     this.scheduleProgress();
     if (delta.hitMine) {
@@ -518,6 +613,7 @@ export class RoomActor {
       boardVisibility: "client_seed",
       boardCommitment: clientBoardSpec(this.#board),
     });
+    if (this.currentReplayUnavailable()) return;
     this.broadcastRoomState();
     this.#countdownTimer = setTimeout(
       () => this.activateRound(),
@@ -553,6 +649,7 @@ export class RoomActor {
       deadline: this.#deadline,
       stateHash: this.hashRoomState(),
     });
+    if (this.currentReplayUnavailable()) return;
     this.broadcastProgress();
     this.broadcastRoomState();
     this.#roundTimer = setTimeout(
@@ -646,6 +743,7 @@ export class RoomActor {
       stateHash: this.hashRoomState(),
     };
     this.record("ROUND_RESULT", undefined, roundResult);
+    if (this.currentReplayUnavailable()) return;
     this.broadcast("ROUND_RESULT", roundResult);
 
     const matchWinner = [...this.#players.values()].find(
@@ -690,7 +788,7 @@ export class RoomActor {
     this.#matchResult = result;
     this.record("MATCH_RESULT", undefined, result);
     const replay = this.#replays.get(this.#matchId);
-    if (replay) {
+    if (replay?.status === "ACTIVE") {
       replay.status = "COMPLETED";
       replay.finishedAt = this.#now();
       replay.result = result;
@@ -713,6 +811,8 @@ export class RoomActor {
     this.#deadline = undefined;
     this.#matchResult = undefined;
     this.#replaySeq = 0;
+    this.#replayBytes = 0;
+    this.#progressSeq = 0;
     for (const player of this.#players.values()) {
       player.ready = false;
       player.rematch = false;
@@ -724,6 +824,7 @@ export class RoomActor {
     }
     this.createReplay();
     this.record("REMATCH_STARTED", undefined, {});
+    if (this.currentReplayUnavailable()) return;
     this.broadcast("REMATCH_STARTED", {
       roomId: this.roomId,
       matchId: this.#matchId,
@@ -756,7 +857,9 @@ export class RoomActor {
 
   private broadcastProgress(): void {
     if (this.#phase !== "ACTIVE" && this.#phase !== "ROUND_RESULT") return;
-    this.#lastProgressAt = this.#now();
+    const generatedAt = this.#now();
+    this.#lastProgressAt = generatedAt;
+    this.#progressSeq += 1;
     const progress = [...this.#players.values()].map((player) => ({
       playerId: player.guest.guestId,
       progress: Math.round((player.game ? getProgress(player.game) : 0) * 100),
@@ -771,15 +874,22 @@ export class RoomActor {
             ? "WON"
             : "PLAYING",
     }));
-    this.broadcast("PROGRESS", {
+    const message = {
+      type: "PROGRESS",
+      v: PROTOCOL_VERSION,
       matchId: this.#matchId,
       round: this.#round,
+      progressSeq: this.#progressSeq,
+      generatedAt,
       progress,
-    });
+    };
+    for (const player of this.#players.values()) {
+      player.sender?.send(message);
+    }
   }
 
-  private catchUp(player: PlayerRuntime, lastServerSeq: number): void {
-    if (lastServerSeq >= player.streamSeq) return;
+  private catchUp(player: PlayerRuntime, lastServerSeq: number): boolean {
+    if (lastServerSeq >= player.streamSeq) return true;
     const first = player.eventRing[0] as
       | { readonly serverSeq?: number }
       | undefined;
@@ -787,8 +897,7 @@ export class RoomActor {
       first?.serverSeq === undefined ||
       lastServerSeq < first.serverSeq - 1
     ) {
-      this.sendSnapshot(player);
-      return;
+      return false;
     }
     for (const rawMessage of player.eventRing) {
       const message = rawMessage as { readonly serverSeq?: number };
@@ -796,6 +905,7 @@ export class RoomActor {
         player.sender?.send(rawMessage);
       }
     }
+    return true;
   }
 
   private sendSnapshot(player: PlayerRuntime): void {
@@ -852,7 +962,8 @@ export class RoomActor {
         : { rejectReason: result.rejectReason }),
       ...(result.delta === undefined ? {} : { delta: result.delta }),
       duplicate,
-      stateHash: result.stateHash,
+      authoritativeStateHash: result.authoritativeStateHash,
+      reconcile: result.reconcile,
     });
   }
 
@@ -875,11 +986,14 @@ export class RoomActor {
     player: PlayerRuntime,
     clientActionId: string,
     rejectReason: string,
+    reconcile: CachedActionResult["reconcile"] = "NONE",
+    authoritativeStateHash = this.hashRoomState(),
   ): void {
     this.cacheAndEmit(player, clientActionId, {
       accepted: false,
       rejectReason,
-      stateHash: this.hashRoomState(),
+      authoritativeStateHash,
+      reconcile,
     });
   }
 
@@ -887,12 +1001,35 @@ export class RoomActor {
     player: PlayerRuntime,
     clientActionId: string,
     rejectReason: string,
+    reconcile: CachedActionResult["reconcile"] = "NONE",
+    authoritativeStateHash = this.hashRoomState(),
   ): void {
     this.emitActionResult(player, clientActionId, {
       accepted: false,
       rejectReason,
-      stateHash: this.hashRoomState(),
+      authoritativeStateHash,
+      reconcile,
     });
+  }
+
+  private isBoardAction(
+    actionType: ClientActionEnvelope["actionType"],
+  ): boolean {
+    return (
+      actionType === "REVEAL" ||
+      actionType === "TOGGLE_FLAG" ||
+      actionType === "CHORD"
+    );
+  }
+
+  private actionBaseStateHash(
+    player: PlayerRuntime,
+    actionType: ClientActionEnvelope["actionType"],
+  ): string {
+    if (this.isBoardAction(actionType)) {
+      return player.game ? hashGameState(player.game) : this.hashRoomState();
+    }
+    return this.hashRoomState();
   }
 
   private emitTo(
@@ -999,7 +1136,7 @@ export class RoomActor {
       if (oldestCompleted) this.#replays.delete(oldestCompleted[0]);
     }
     this.#replays.set(this.#matchId, {
-      v: PROTOCOL_VERSION,
+      v: 1,
       replayId: this.#matchId,
       roomId: this.roomId,
       matchId: this.#matchId,
@@ -1012,6 +1149,7 @@ export class RoomActor {
       })),
       events: [],
     });
+    this.#replayBytes = 0;
   }
 
   private refreshReplayPlayers(): void {
@@ -1030,15 +1168,56 @@ export class RoomActor {
   ): void {
     const replay = this.#replays.get(this.#matchId);
     if (!replay || replay.status !== "ACTIVE") return;
-    this.#replaySeq += 1;
     const event: ReplayEvent = {
-      seq: this.#replaySeq,
+      seq: this.#replaySeq + 1,
       at: this.#now(),
       type,
       ...(actorGuestId === undefined ? {} : { actorGuestId }),
       payload,
     };
+    let eventBytes: number;
+    try {
+      eventBytes = Buffer.byteLength(JSON.stringify(event), "utf8");
+    } catch {
+      this.markReplayUnavailable("REPLAY_SERIALIZATION_FAILED");
+      return;
+    }
+    if (
+      replay.events.length >= this.#maxReplayEvents ||
+      this.#replayBytes + eventBytes > this.#maxReplayBytes
+    ) {
+      this.markReplayUnavailable("REPLAY_BUDGET_EXCEEDED");
+      return;
+    }
+    this.#replaySeq += 1;
+    this.#replayBytes += eventBytes;
     replay.events.push(event);
+  }
+
+  private markReplayUnavailable(reason: string): void {
+    const replay = this.#replays.get(this.#matchId);
+    if (!replay || replay.status !== "ACTIVE") return;
+    replay.status = "UNAVAILABLE";
+    replay.finishedAt = this.#now();
+    replay.result = {
+      outcome: "NO_CONTEST",
+      reason,
+      scores: this.scoreRecord(),
+    };
+    if (
+      this.#phase !== "MATCH_RESULT" &&
+      this.#phase !== "CLOSED"
+    ) {
+      this.finishMatch({
+        outcome: "NO_CONTEST",
+        reason,
+        scores: this.scoreRecord(),
+      });
+    }
+  }
+
+  private currentReplayUnavailable(): boolean {
+    return this.#replays.get(this.#matchId)?.status === "UNAVAILABLE";
   }
 
   private clearRoundTimers(): void {

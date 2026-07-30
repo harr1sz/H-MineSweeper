@@ -1,4 +1,8 @@
-import { certifyNoGuess, createBoard } from "@h-minesweeper/game-core";
+import {
+  PROTOCOL_VERSION,
+  certifyNoGuess,
+  createBoard,
+} from "@h-minesweeper/game-core";
 import type { BoardSpec } from "@h-minesweeper/game-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -44,6 +48,64 @@ function lastServerSeq(messages: unknown[]): number {
   return 0;
 }
 
+function lastStateHash(
+  messages: unknown[],
+  actionType: ClientActionEnvelope["actionType"],
+): string {
+  const boardAction =
+    actionType === "REVEAL" ||
+    actionType === "TOGGLE_FLAG" ||
+    actionType === "CHORD";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as {
+      type?: unknown;
+      stateHash?: unknown;
+      authoritativeStateHash?: unknown;
+      snapshot?: {
+        stateHash?: unknown;
+        ownGame?: { stateHash?: unknown };
+      };
+    } | undefined;
+    if (
+      typeof message?.authoritativeStateHash === "string" &&
+      message.type === "ACTION_RESULT"
+    ) {
+      return message.authoritativeStateHash;
+    }
+    if (
+      boardAction &&
+      message?.type === "ROUND_ACTIVE" &&
+      typeof message.stateHash === "string"
+    ) {
+      return message.stateHash;
+    }
+    if (
+      boardAction &&
+      message?.type === "SNAPSHOT" &&
+      typeof message.snapshot?.ownGame?.stateHash === "string"
+    ) {
+      return message.snapshot.ownGame.stateHash;
+    }
+    if (
+      !boardAction &&
+      (message?.type === "ROOM_STATE" ||
+        message?.type === "ROUND_RESULT" ||
+        message?.type === "MATCH_RESULT") &&
+      typeof message.stateHash === "string"
+    ) {
+      return message.stateHash;
+    }
+    if (
+      !boardAction &&
+      message?.type === "SNAPSHOT" &&
+      typeof message.snapshot?.stateHash === "string"
+    ) {
+      return message.snapshot.stateHash;
+    }
+  }
+  throw new Error(`Missing base state hash for ${actionType}`);
+}
+
 function action(
   actor: RoomActor,
   messages: unknown[],
@@ -52,11 +114,12 @@ function action(
   cellIndex?: number,
 ): ClientActionEnvelope {
   return {
-    v: 1,
+    v: PROTOCOL_VERSION,
     matchId: actor.matchId,
     connectionEpoch: 1,
     clientActionId,
     lastServerSeq: lastServerSeq(messages),
+    baseStateHash: lastStateHash(messages, actionType),
     actionType,
     ...(cellIndex === undefined ? {} : { cellIndex }),
     clientMonoTelemetry: 10,
@@ -250,6 +313,238 @@ describe("RoomActor", () => {
       winnerGuestId: second.guestId,
       reason: "OPPONENT_HIT_MINE",
     });
+    actor.close();
+  });
+
+  it("keeps lossy progress outside the reliable server sequence", async () => {
+    const first = session("guest-a", "Alpha");
+    const second = session("guest-b", "Bravo");
+    const firstMessages: unknown[] = [];
+    const secondMessages: unknown[] = [];
+    const actor = new RoomActor({
+      roomId: "progress-sequence-room",
+      roomCode: "PRGSEQ",
+      host: first,
+      boardSpecs: [boardSpec],
+      now: Date.now,
+      timings: {
+        countdownMs: 1,
+        roundDurationMs: 1_000,
+        terminalWindowMs: 5,
+        progressIntervalMs: 10,
+      },
+    });
+    actor.addPlayer(second);
+    actor.connect(first.guestId, 1, collector(firstMessages));
+    actor.connect(second.guestId, 1, collector(secondMessages));
+    actor.handleAction(
+      first.guestId,
+      action(actor, firstMessages, "ready-a", "READY"),
+    );
+    actor.handleAction(
+      second.guestId,
+      action(actor, secondMessages, "ready-b", "READY"),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    const progressMessages = firstMessages.filter(
+      (message) => (message as { type?: string }).type === "PROGRESS",
+    ) as Array<{
+      serverSeq?: number;
+      progressSeq?: number;
+      generatedAt?: number;
+    }>;
+    expect(progressMessages).not.toHaveLength(0);
+    expect(progressMessages[0]).toMatchObject({
+      progressSeq: 1,
+      generatedAt: Date.now(),
+    });
+    expect(progressMessages.every((message) => message.serverSeq === undefined))
+      .toBe(true);
+
+    const reliableSequences = firstMessages.flatMap((message) => {
+      const serverSeq = (message as { serverSeq?: unknown }).serverSeq;
+      return typeof serverSeq === "number" ? [serverSeq] : [];
+    });
+    expect(reliableSequences).toEqual(
+      Array.from(
+        { length: reliableSequences.length },
+        (_, index) => index + 1,
+      ),
+    );
+    actor.close();
+  });
+
+  it("requests a snapshot for a mismatched action baseline without ending the match", async () => {
+    const first = session("guest-a", "Alpha");
+    const second = session("guest-b", "Bravo");
+    const firstMessages: unknown[] = [];
+    const secondMessages: unknown[] = [];
+    const actor = new RoomActor({
+      roomId: "baseline-room",
+      roomCode: "BASE01",
+      host: first,
+      boardSpecs: [boardSpec],
+      now: Date.now,
+      timings: {
+        countdownMs: 1,
+        roundDurationMs: 1_000,
+        terminalWindowMs: 5,
+        progressIntervalMs: 10,
+      },
+    });
+    actor.addPlayer(second);
+    actor.connect(first.guestId, 1, collector(firstMessages));
+    actor.connect(second.guestId, 1, collector(secondMessages));
+    actor.handleAction(
+      first.guestId,
+      action(actor, firstMessages, "ready-a", "READY"),
+    );
+    actor.handleAction(
+      second.guestId,
+      action(actor, secondMessages, "ready-b", "READY"),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    actor.handleAction(first.guestId, {
+      ...action(actor, firstMessages, "stale-base", "TOGGLE_FLAG", 0),
+      baseStateHash: "stale-client-state",
+    });
+
+    const result = [...firstMessages].reverse().find(
+      (message) =>
+        (message as { ackClientActionId?: string }).ackClientActionId ===
+        "stale-base",
+    ) as {
+      accepted?: boolean;
+      rejectReason?: string;
+      reconcile?: string;
+    } | undefined;
+    expect(result).toMatchObject({
+      accepted: false,
+      rejectReason: "BASE_STATE_MISMATCH",
+      reconcile: "SNAPSHOT_REQUIRED",
+    });
+    expect(
+      firstMessages.some(
+        (message) => (message as { type?: string }).type === "SNAPSHOT",
+      ),
+    ).toBe(true);
+    expect(actor.phase).toBe("ACTIVE");
+    actor.close();
+  });
+
+  it("marks over-budget replays unavailable instead of retaining partial authority", () => {
+    const host = session("guest-a", "Alpha");
+    const eventLimited = new RoomActor({
+      roomId: "event-budget-room",
+      roomCode: "EVTCAP",
+      host,
+      maxReplayEvents: 1,
+      maxReplayBytes: 10_000,
+      now: Date.now,
+      timings: {
+        countdownMs: 1,
+        roundDurationMs: 100,
+        terminalWindowMs: 5,
+        progressIntervalMs: 10,
+      },
+    });
+    expect(eventLimited.addPlayer(session("guest-b", "Bravo"))).toBe(true);
+    expect(eventLimited.phase).toBe("MATCH_RESULT");
+    expect(eventLimited.getReplay(eventLimited.matchId)).toBeUndefined();
+    const eventMessages: unknown[] = [];
+    eventLimited.connect(host.guestId, 1, collector(eventMessages));
+    const eventSnapshot = eventMessages.find(
+      (message) => (message as { type?: string }).type === "SNAPSHOT",
+    ) as {
+      snapshot?: {
+        matchResult?: { reason?: string };
+      };
+    } | undefined;
+    expect(eventSnapshot?.snapshot?.matchResult?.reason)
+      .toBe("REPLAY_BUDGET_EXCEEDED");
+    eventLimited.close();
+
+    const byteLimited = new RoomActor({
+      roomId: "byte-budget-room",
+      roomCode: "BYTECP",
+      host,
+      maxReplayEvents: 100,
+      maxReplayBytes: 1,
+      now: Date.now,
+      timings: {
+        countdownMs: 1,
+        roundDurationMs: 100,
+        terminalWindowMs: 5,
+        progressIntervalMs: 10,
+      },
+    });
+    expect(byteLimited.phase).toBe("MATCH_RESULT");
+    expect(byteLimited.getReplay(byteLimited.matchId)).toBeUndefined();
+    byteLimited.close();
+  });
+
+  it("rejects an at-deadline action with rollback metadata and settles TIMEOUT", async () => {
+    let now = 0;
+    const first = session("guest-a", "Alpha");
+    const second = session("guest-b", "Bravo");
+    const firstMessages: unknown[] = [];
+    const secondMessages: unknown[] = [];
+    const actor = new RoomActor({
+      roomId: "deadline-rollback-room",
+      roomCode: "DLROLL",
+      host: first,
+      boardSpecs: [boardSpec],
+      now: () => now,
+      timings: {
+        countdownMs: 1,
+        roundDurationMs: 100,
+        terminalWindowMs: 5,
+        progressIntervalMs: 10,
+      },
+    });
+    actor.addPlayer(second);
+    actor.connect(first.guestId, 1, collector(firstMessages));
+    actor.connect(second.guestId, 1, collector(secondMessages));
+    actor.handleAction(
+      first.guestId,
+      action(actor, firstMessages, "ready-a", "READY"),
+    );
+    actor.handleAction(
+      second.guestId,
+      action(actor, secondMessages, "ready-b", "READY"),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    const authoritativeBefore = lastStateHash(firstMessages, "REVEAL");
+    now = 100;
+    actor.handleAction(
+      first.guestId,
+      action(actor, firstMessages, "at-deadline", "REVEAL", 0),
+    );
+
+    const actionResult = [...firstMessages].reverse().find(
+      (message) =>
+        (message as { ackClientActionId?: string }).ackClientActionId ===
+        "at-deadline",
+    ) as {
+      accepted?: boolean;
+      rejectReason?: string;
+      authoritativeStateHash?: string;
+      reconcile?: string;
+    } | undefined;
+    expect(actionResult).toMatchObject({
+      accepted: false,
+      rejectReason: "ROUND_EXPIRED",
+      authoritativeStateHash: authoritativeBefore,
+      reconcile: "ROLLBACK",
+    });
+    const roundResult = [...firstMessages].reverse().find(
+      (message) => (message as { type?: string }).type === "ROUND_RESULT",
+    ) as { reason?: string } | undefined;
+    expect(roundResult?.reason).toBe("TIMEOUT_DRAW");
+    expect(actor.phase).toBe("ROUND_RESULT");
     actor.close();
   });
 

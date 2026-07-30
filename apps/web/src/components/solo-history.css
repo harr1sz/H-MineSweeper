@@ -1,0 +1,252 @@
+.solo-history {
+  width: min(1220px, 100%);
+  margin: 18px auto 0;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 3%), transparent 45%),
+    rgb(13 14 16 / 94%);
+  box-shadow: inset 0 1px 0 rgb(255 217 137 / 8%);
+  padding: 22px;
+}
+
+.solo-history-heading,
+.solo-history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.solo-history-heading h2 {
+  margin: 7px 0 6px;
+  font-size: 24px;
+}
+
+.solo-history-heading p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.solo-history-heading > button {
+  flex: 0 0 auto;
+}
+
+.solo-history-message {
+  margin-top: 16px;
+  border: 1px solid rgb(69 214 168 / 35%);
+  background: rgb(69 214 168 / 7%);
+  color: var(--green);
+  padding: 11px 13px;
+  font-size: 12px;
+}
+
+.solo-history-message.is-error {
+  border-color: rgb(255 113 130 / 40%);
+  background: rgb(255 113 130 / 8%);
+  color: var(--red);
+}
+
+.solo-history-save-error {
+  display: flex;
+  max-width: 520px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px auto 0;
+  border: 1px solid rgb(255 113 130 / 40%);
+  background: rgb(255 113 130 / 8%);
+  color: var(--red);
+  padding: 10px 12px;
+  font-size: 11px;
+}
+
+.solo-history-save-error button {
+  flex: 0 0 auto;
+}
+
+.solo-history-trend {
+  display: grid;
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.solo-history-trend > div {
+  display: grid;
+  min-height: 92px;
+  align-content: center;
+  gap: 7px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 13px;
+}
+
+.solo-history-trend span,
+.solo-history-list span {
+  color: var(--faint);
+  font: 650 8px var(--mono);
+  letter-spacing: 0.06em;
+}
+
+.solo-history-trend strong {
+  color: var(--ink);
+  font: 700 17px var(--mono);
+}
+
+.solo-history-trend small,
+.solo-history-list small {
+  color: var(--muted);
+  font: 600 8px var(--mono);
+}
+
+.solo-history-toolbar {
+  margin-top: 16px;
+}
+
+.solo-history-scope {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.solo-history-scope button {
+  min-height: 42px;
+  border: 1px solid #303137;
+  background: #0a0a0c;
+  color: var(--muted);
+  cursor: pointer;
+  font: 650 9px var(--mono);
+  padding: 0 13px;
+}
+
+.solo-history-scope button + button {
+  border-left: 0;
+}
+
+.solo-history-scope button:hover,
+.solo-history-scope button.is-active {
+  background: #191a1f;
+  color: var(--ink);
+}
+
+.solo-history-scope button.is-active {
+  border-color: var(--gold);
+  box-shadow: inset 0 -2px 0 var(--gold);
+}
+
+.solo-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.solo-history-import {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.solo-history-import input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.solo-history-import:focus-within {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.solo-history-delete {
+  color: var(--red);
+}
+
+.solo-history-empty {
+  margin-top: 16px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.solo-history-list {
+  display: grid;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.solo-history-list article {
+  display: grid;
+  min-height: 70px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  grid-template-columns: minmax(220px, 1.5fr) 110px repeat(3, minmax(90px, 0.6fr));
+  gap: 14px;
+  padding: 10px 12px;
+}
+
+.solo-history-list article > div {
+  display: grid;
+  gap: 5px;
+}
+
+.solo-history-list article > div strong {
+  font-size: 12px;
+}
+
+.solo-history-list article > b {
+  color: var(--gold);
+  font: 700 13px var(--mono);
+}
+
+.solo-history-list > p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 980px) {
+  .solo-history-trend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .solo-history-list article {
+    grid-template-columns: minmax(200px, 1fr) repeat(2, minmax(90px, 0.5fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .solo-history {
+    padding: 18px 12px;
+  }
+
+  .solo-history-heading,
+  .solo-history-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .solo-history-trend {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .solo-history-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .solo-history-list article {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .solo-history-list article > div {
+    grid-column: 1 / -1;
+  }
+}

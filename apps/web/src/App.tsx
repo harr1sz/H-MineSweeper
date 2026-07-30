@@ -25,6 +25,7 @@ import {
 } from "./components/ProgressChart";
 import { SoloGame } from "./components/SoloGame";
 import {
+  ApiError,
   createGuestSession,
   createRoom,
   joinRoom,
@@ -33,10 +34,17 @@ import {
 import { formatDuration, formatRtt, normalizeRoomCode } from "./lib/format";
 import { percentile, recordMetric } from "./lib/performance";
 import type { SoloGenerationMode } from "./lib/solo";
+import { useTelemetry } from "./components/TelemetryPrivacy";
 import {
   RealtimeClient,
+  captureOptimisticGameState,
+  classifyReliableSequence,
+  planActionReconciliation,
+  rollbackOptimisticGameState,
   type ConnectionStatus,
+  type OptimisticGameSnapshot,
 } from "./lib/realtime";
+import { DUEL_EXPERIMENT_ENABLED } from "./lib/build-config";
 
 type UiPhase =
   | "HOME"
@@ -53,11 +61,54 @@ type EffectsProfile = "full" | "lite" | "essential";
 
 const MOTION_PREFERENCE_KEY = "hms-motion-preference";
 const EFFECTS_PROFILE_KEY = "hms-effects-profile";
+interface PendingOptimisticAction {
+  readonly preAction: OptimisticGameSnapshot;
+  readonly optimisticStateHash: string;
+}
 
 function readLocalModeFromLocation(): LocalMode {
   if (window.location.hash.startsWith("#/solo")) return "solo";
   if (window.location.hash === "#/academy") return "academy";
   return null;
+}
+
+function readInvitedRoomCode(): string {
+  if (!DUEL_EXPERIMENT_ENABLED) return "";
+  const code = normalizeRoomCode(
+    new URLSearchParams(window.location.search).get("room") ?? "",
+  );
+  return code.length === 6 ? code : "";
+}
+
+function readInitialHomeMode(): HomeMode {
+  return readInvitedRoomCode() ? "duel" : "solo";
+}
+
+function duelEntryError(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return "无法进入 1v1 房间；你可以返回单人训练，不会影响本地历史。";
+  }
+  if (error.code === "ROOM_FULL") {
+    return "该房间已有两名玩家。请让房主创建新邀请，或返回单人训练。";
+  }
+  if (error.code === "ROOM_NOT_FOUND") {
+    return "房间不存在、已过期或比赛已结束。请检查邀请链接，或让房主重新创建。";
+  }
+  if (error.code === "ALREADY_JOINED") {
+    return "这个测试身份已经在该房间中；请回到原页面，或创建新房间。";
+  }
+  if (error.code === "RATE_LIMITED") {
+    return "进入房间过于频繁，请稍后重试；单人训练仍可继续。";
+  }
+  return error.message || "无法进入 1v1 房间。";
+}
+
+function duelInviteUrl(roomCode: string): string {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.search = "";
+  url.searchParams.set("room", roomCode);
+  return url.toString();
 }
 
 function readSoloLaunchModeFromLocation(): SoloGenerationMode {
@@ -66,13 +117,29 @@ function readSoloLaunchModeFromLocation(): SoloGenerationMode {
     : "classic";
 }
 
+function safeLocalStorageGet(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalStorageSet(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Preferences are best-effort. Storage failures must not block play.
+  }
+}
+
 function readMotionPreference(): MotionPreference {
-  const stored = window.localStorage.getItem(MOTION_PREFERENCE_KEY);
+  const stored = safeLocalStorageGet(MOTION_PREFERENCE_KEY);
   return stored === "full" || stored === "reduced" ? stored : "system";
 }
 
 function readEffectsProfile(): EffectsProfile {
-  const stored = window.localStorage.getItem(EFFECTS_PROFILE_KEY);
+  const stored = safeLocalStorageGet(EFFECTS_PROFILE_KEY);
   return stored === "lite" || stored === "essential" ? stored : "full";
 }
 
@@ -143,14 +210,23 @@ function resultCopy(
 }
 
 export function App() {
+  const { flush: flushTelemetry, track } = useTelemetry();
   const realtimeRef = useRef(new RealtimeClient());
   const gameRef = useRef<GameState | null>(null);
   const actionCounterRef = useRef(0);
   const matchVisualSequenceRef = useRef(0);
-  const pendingActionHashesRef = useRef(new Map<string, string>());
+  const pendingActionsRef = useRef(
+    new Map<string, PendingOptimisticAction>(),
+  );
   const processedServerSeqRef = useRef(0);
+  const processedProgressSeqRef = useRef(0);
+  const snapshotRequiredRef = useRef(false);
+  const protocolBlockedRef = useRef(false);
+  const authoritativeHashRef = useRef("");
   const playerIdRef = useRef("");
   const roundStartedAtRef = useRef<number | null>(null);
+  const roundRef = useRef(1);
+  const inviteOpenedTrackedRef = useRef(false);
   const phaseRef = useRef<UiPhase>("HOME");
   const connectedOnceRef = useRef(false);
   const leaveRoomRef = useRef<() => void>(() => undefined);
@@ -160,12 +236,12 @@ export function App() {
   );
   const [soloLaunchMode, setSoloLaunchMode] =
     useState<SoloGenerationMode>(readSoloLaunchModeFromLocation);
-  const [homeMode, setHomeMode] = useState<HomeMode>("solo");
+  const [homeMode, setHomeMode] = useState<HomeMode>(readInitialHomeMode);
   const [connection, setConnection] = useState<ConnectionStatus>("disconnected");
   const [displayName, setDisplayName] = useState(
-    () => window.localStorage.getItem("hms-display-name") ?? "",
+    () => safeLocalStorageGet("hms-display-name") ?? "",
   );
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(readInvitedRoomCode);
   const [roomId, setRoomId] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [matchId, setMatchId] = useState("");
@@ -217,7 +293,17 @@ export function App() {
   void rttTick;
   playerIdRef.current = playerId;
   roundStartedAtRef.current = roundStartedAt;
+  roundRef.current = round;
   phaseRef.current = phase;
+  authoritativeHashRef.current = authoritativeHash;
+
+  useEffect(() => {
+    const invitedRoomCode = readInvitedRoomCode();
+    if (!invitedRoomCode || inviteOpenedTrackedRef.current) return;
+    inviteOpenedTrackedRef.current = true;
+    track("duel_invite_opened", { source: "invite" });
+    void flushTelemetry();
+  }, [flushTelemetry, track]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -333,7 +419,9 @@ export function App() {
   }, [effectsProfile, reducedMotion]);
 
   const markTechnicalDisconnect = useCallback(() => {
-    pendingActionHashesRef.current.clear();
+    if (phaseRef.current === "MATCH_RESULT") return;
+    phaseRef.current = "MATCH_RESULT";
+    pendingActionsRef.current.clear();
     setPlayers((current) =>
       current.map((player) =>
         player.playerId === playerIdRef.current
@@ -350,10 +438,15 @@ export function App() {
       reason: "TECHNICAL_DNF",
     });
     setPhase("MATCH_RESULT");
-  }, []);
+    track("duel_dnf", {
+      reason: "DISCONNECTED",
+      round: roundRef.current,
+    });
+    void flushTelemetry();
+  }, [flushTelemetry, track]);
 
   const failIntegrity = useCallback((detail: string) => {
-    pendingActionHashesRef.current.clear();
+    pendingActionsRef.current.clear();
     phaseRef.current = "MATCH_RESULT";
     setConnectionLost(true);
     setRoundFinishedAt((current) => current ?? Date.now());
@@ -365,7 +458,12 @@ export function App() {
     setError("客户端与权威状态不一致，本场已安全冻结。");
     setPhase("MATCH_RESULT");
     realtimeRef.current.disconnect();
-  }, []);
+    track("duel_dnf", {
+      reason: "STATE_DIVERGED",
+      round: roundRef.current,
+    });
+    void flushTelemetry();
+  }, [flushTelemetry, track]);
 
   const handleConnectionStatus = useCallback(
     (status: ConnectionStatus) => {
@@ -397,12 +495,17 @@ export function App() {
     (
       actionType: "READY" | BoardAction | "REMATCH",
       cellIndex?: number,
-      expectedStateHash?: string,
+      baseStateHash = authoritativeHashRef.current,
+      pendingAction?: PendingOptimisticAction,
     ) => {
+      if (!baseStateHash) {
+        setError("尚未取得可提交操作的权威状态基线。");
+        return false;
+      }
       actionCounterRef.current += 1;
       const clientActionId = `${playerId || "pending"}-${actionCounterRef.current}`;
-      if (expectedStateHash !== undefined) {
-        pendingActionHashesRef.current.set(clientActionId, expectedStateHash);
+      if (pendingAction !== undefined) {
+        pendingActionsRef.current.set(clientActionId, pendingAction);
       }
       const envelope: ClientActionEnvelope = {
         v: PROTOCOL_VERSION,
@@ -410,6 +513,7 @@ export function App() {
         connectionEpoch,
         clientActionId,
         lastServerSeq,
+        baseStateHash,
         actionType,
         ...(cellIndex === undefined ? {} : { cellIndex }),
         clientMonoTelemetry: performance.now(),
@@ -419,7 +523,7 @@ export function App() {
         envelope,
       });
       if (!sent) {
-        pendingActionHashesRef.current.delete(clientActionId);
+        pendingActionsRef.current.delete(clientActionId);
         setError("实时连接不可用，操作未发送。");
       }
       return sent;
@@ -450,12 +554,16 @@ export function App() {
 
   const handleMessage = useCallback(
     (message: ServerMessage) => {
+      if (protocolBlockedRef.current && message.type !== "ERROR") {
+        return;
+      }
       if ("serverSeq" in message && typeof message.serverSeq === "number") {
-        if (message.serverSeq <= processedServerSeqRef.current) return;
-        if (
-          processedServerSeqRef.current > 0 &&
-          message.serverSeq > processedServerSeqRef.current + 1
-        ) {
+        const sequenceStatus = classifyReliableSequence(
+          processedServerSeqRef.current,
+          message.serverSeq,
+        );
+        if (sequenceStatus === "DUPLICATE") return;
+        if (sequenceStatus === "GAP") {
           failIntegrity("检测到不可恢复的服务端序号缺口；阶段 0 按技术 DNF 处理。");
           return;
         }
@@ -465,6 +573,7 @@ export function App() {
 
       switch (message.type) {
         case "WELCOME": {
+          processedProgressSeqRef.current = 0;
           setPlayerId(message.playerId);
           setRoomId(message.roomId);
           setRoomCode(message.roomCode);
@@ -476,6 +585,7 @@ export function App() {
         }
         case "ROOM_STATE": {
           updatePlayers(message.players, message.scores);
+          setAuthoritativeHash(message.stateHash);
           if (message.matchId) setMatchId(message.matchId);
           if (message.phase === "REMATCH") {
             const votes = message.players.filter((player) => player.rematch).length;
@@ -490,7 +600,7 @@ export function App() {
             message.boardVisibility !== "client_seed" ||
             !("seed" in message.boardSpec)
           ) {
-            setError("此 Phase 0 客户端不支持服务器保密棋盘。");
+            setError("当前 Alpha 客户端不支持服务器保密棋盘。");
             return;
           }
           try {
@@ -507,7 +617,8 @@ export function App() {
           setRoundFinishedAt(null);
           setMatchActionVisual(undefined);
           setAuthoritativeHash("");
-          pendingActionHashesRef.current.clear();
+          pendingActionsRef.current.clear();
+          snapshotRequiredRef.current = false;
           setProgressHistory([]);
           setResult(null);
           setConnectionLost(false);
@@ -526,27 +637,62 @@ export function App() {
           setAuthoritativeHash(message.stateHash);
           setCountdownDeadline(null);
           setPhase("ACTIVE");
+          track("duel_started", { round: message.round });
           break;
         }
         case "ACTION_RESULT": {
-          const expectedHash = pendingActionHashesRef.current.get(
+          const pendingAction = pendingActionsRef.current.get(
             message.ackClientActionId,
           );
-          pendingActionHashesRef.current.delete(message.ackClientActionId);
+          pendingActionsRef.current.delete(message.ackClientActionId);
+          const reconciliationPlan = planActionReconciliation(
+            message.reconcile,
+            pendingActionsRef.current.size,
+          );
           if (message.accepted === false) {
             setNotice(message.rejectReason ?? "操作未被服务器接受");
           }
-          if (
-            expectedHash &&
-            expectedHash !== message.stateHash
-          ) {
-            failIntegrity("本地棋盘与服务器状态哈希不一致；没有继续提交后续操作。");
+          if (reconciliationPlan === "WAIT_FOR_SNAPSHOT") {
+            snapshotRequiredRef.current = true;
+            setNotice("操作需要权威快照对账，后续输入已暂时冻结。");
             return;
           }
-          setAuthoritativeHash(message.stateHash);
+          const activeGame = gameRef.current;
+          if (
+            reconciliationPlan === "ROLLBACK" &&
+            pendingAction &&
+            activeGame
+          ) {
+            rollbackOptimisticGameState(activeGame, pendingAction.preAction);
+            setMatchActionVisual(undefined);
+            setGameRevision((value) => value + 1);
+          }
+          if (
+            reconciliationPlan !== "DEFER" &&
+            pendingAction &&
+            activeGame
+          ) {
+            const localStateHash = hashGameState(activeGame);
+            const expectedLocalHash =
+              message.reconcile === "ROLLBACK"
+                ? message.authoritativeStateHash
+                : pendingAction.optimisticStateHash;
+            if (
+              localStateHash !== expectedLocalHash ||
+              localStateHash !== message.authoritativeStateHash
+            ) {
+              failIntegrity("操作对账后本地棋盘与权威状态哈希不一致。");
+              return;
+            }
+          }
+          setAuthoritativeHash(message.authoritativeStateHash);
           break;
         }
         case "PROGRESS": {
+          if (message.progressSeq <= processedProgressSeqRef.current) {
+            return;
+          }
+          processedProgressSeqRef.current = message.progressSeq;
           const progress = message.progress;
           setPlayers((current) =>
             current.map((player) => {
@@ -581,6 +727,7 @@ export function App() {
         }
         case "ROUND_RESULT": {
           setScores(message.scores);
+          setAuthoritativeHash(message.stateHash);
           setRound(message.round);
           setRoundFinishedAt(Date.now());
           setResult(
@@ -596,6 +743,7 @@ export function App() {
         }
         case "MATCH_RESULT": {
           setScores(message.scores);
+          setAuthoritativeHash(message.stateHash);
           setRoundFinishedAt((current) => current ?? Date.now());
           setReplayId(message.replayId);
           setResult(
@@ -607,6 +755,16 @@ export function App() {
             ),
           );
           setPhase("MATCH_RESULT");
+          track("duel_completed", {
+            outcome:
+              message.outcome === "NO_CONTEST"
+                ? "DRAW"
+                : message.winnerGuestId === playerIdRef.current
+                  ? "WIN"
+                  : "LOSS",
+            rounds: roundRef.current,
+          });
+          void flushTelemetry();
           break;
         }
         case "REMATCH_STARTED": {
@@ -621,7 +779,9 @@ export function App() {
           setMatchActionVisual(undefined);
           setConnectionLost(false);
           setProgressHistory([]);
-          pendingActionHashesRef.current.clear();
+          pendingActionsRef.current.clear();
+          processedProgressSeqRef.current = 0;
+          snapshotRequiredRef.current = false;
           setRoundFinishedAt(null);
           setPhase("LOBBY");
           setNotice("新比赛已建立，等待双方准备");
@@ -629,6 +789,8 @@ export function App() {
         }
         case "SNAPSHOT": {
           const snapshot = message.snapshot;
+          snapshotRequiredRef.current = false;
+          pendingActionsRef.current.clear();
           setRoomId(snapshot.roomId);
           setRoomCode(snapshot.roomCode);
           setMatchId(snapshot.matchId);
@@ -679,6 +841,8 @@ export function App() {
               failIntegrity("权威快照无法按当前规则版本恢复。");
               return;
             }
+          } else {
+            setAuthoritativeHash(snapshot.stateHash);
           }
           if (snapshot.deadline !== undefined && snapshot.phase === "COUNTDOWN") {
             setCountdownDeadline(
@@ -693,6 +857,14 @@ export function App() {
           break;
         }
         case "ERROR": {
+          if (message.code === "UPGRADE_REQUIRED") {
+            protocolBlockedRef.current = true;
+            snapshotRequiredRef.current = true;
+            pendingActionsRef.current.clear();
+            setError("客户端版本与实时服务不兼容，请刷新或升级后重试。");
+            setNotice("需要升级客户端");
+            break;
+          }
           setError(message.message);
           break;
         }
@@ -701,10 +873,14 @@ export function App() {
         }
       }
     },
-    [failIntegrity, updatePlayers],
+    [failIntegrity, flushTelemetry, track, updatePlayers],
   );
 
   const enterRoom = async (mode: "create" | "join") => {
+    if (!DUEL_EXPERIMENT_ENABLED) {
+      setError("1v1 实验当前关闭；专业单人训练仍可正常使用。");
+      return;
+    }
     const name = displayName.trim();
     if (name.length < 2) {
       setError("昵称至少需要 2 个字符");
@@ -716,9 +892,10 @@ export function App() {
     }
 
     setBusy(true);
+    const entryStartedAt = performance.now();
     setError("");
     setNotice("");
-    window.localStorage.setItem("hms-display-name", name);
+    safeLocalStorageSet("hms-display-name", name);
     try {
       const guest = await createGuestSession(name);
       const room = mode === "create"
@@ -728,14 +905,28 @@ export function App() {
       setRoomCode(room.roomCode);
       connectedOnceRef.current = false;
       processedServerSeqRef.current = 0;
+      processedProgressSeqRef.current = 0;
+      snapshotRequiredRef.current = false;
+      protocolBlockedRef.current = false;
       setLastServerSeq(0);
       await realtimeRef.current.connect(
         room.ticket,
         handleMessage,
         handleConnectionStatus,
       );
+      if (mode === "create") {
+        track("duel_invite_created", {
+          source: "home",
+          stageDurationMs: performance.now() - entryStartedAt,
+        });
+      } else {
+        track("duel_joined", {
+          stageDurationMs: performance.now() - entryStartedAt,
+        });
+      }
+      void flushTelemetry();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法进入房间");
+      setError(duelEntryError(cause));
       setConnection("error");
     } finally {
       setBusy(false);
@@ -744,8 +935,17 @@ export function App() {
 
   const handleBoardAction = (action: BoardAction, cellIndex: number) => {
     const activeGame = gameRef.current;
-    if (!activeGame || phase !== "ACTIVE" || connection !== "connected") return;
+    if (
+      !activeGame ||
+      phase !== "ACTIVE" ||
+      connection !== "connected" ||
+      snapshotRequiredRef.current
+    ) {
+      return;
+    }
     const started = performance.now();
+    const preAction = captureOptimisticGameState(activeGame);
+    const baseStateHash = hashGameState(activeGame);
     const delta =
       action === "REVEAL"
         ? revealCell(activeGame, cellIndex)
@@ -768,8 +968,16 @@ export function App() {
       ),
     });
     setGameRevision((value) => value + 1);
-    const sent = sendAction(action, cellIndex, hashGameState(activeGame));
-    if (!sent) markTechnicalDisconnect();
+    const sent = sendAction(action, cellIndex, baseStateHash, {
+      preAction,
+      optimisticStateHash: hashGameState(activeGame),
+    });
+    if (!sent) {
+      rollbackOptimisticGameState(activeGame, preAction);
+      setMatchActionVisual(undefined);
+      setGameRevision((value) => value + 1);
+      markTechnicalDisconnect();
+    }
     recordMetric("actionApplyMs", performance.now() - started);
   };
 
@@ -786,10 +994,13 @@ export function App() {
     setConnectionLost(false);
     connectedOnceRef.current = false;
     processedServerSeqRef.current = 0;
+    processedProgressSeqRef.current = 0;
+    snapshotRequiredRef.current = false;
+    protocolBlockedRef.current = false;
     setLastServerSeq(0);
     setAuthoritativeHash("");
     setMatchActionVisual(undefined);
-    pendingActionHashesRef.current.clear();
+    pendingActionsRef.current.clear();
     setError("");
     setNotice("");
   };
@@ -817,16 +1028,19 @@ export function App() {
 
   const enterSolo = (soloMode: SoloGenerationMode = "classic") => {
     leaveRoom();
+    track("mode_selected", { mode: "solo", source: "home" });
     pushLocalMode("solo", soloMode);
   };
 
   const enterAcademy = () => {
     leaveRoom();
+    track("mode_selected", { mode: "academy", source: "home" });
     pushLocalMode("academy");
   };
 
   const openSoloFromAcademy = (soloMode: SoloGenerationMode) => {
     leaveRoom();
+    track("mode_selected", { mode: "solo", source: "navigation" });
     const hash =
       soloMode === "no_guess" ? "#/solo/no-guess" : "#/solo";
     window.history.replaceState(
@@ -850,8 +1064,13 @@ export function App() {
   };
 
   const chooseHomeMode = (nextMode: HomeMode) => {
+    if (nextMode === "duel" && !DUEL_EXPERIMENT_ENABLED) return;
     if (nextMode === homeMode) return;
     setHomeMode(nextMode);
+    track("mode_selected", {
+      mode: nextMode,
+      source: "home",
+    });
     setError("");
     setNotice("");
   };
@@ -878,6 +1097,9 @@ export function App() {
     <div
       className={`app-shell effects-${effectsProfile}${reducedMotion ? " reduced-motion" : ""}`}
     >
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <header className="topbar">
         <button
           className="brand-button"
@@ -893,7 +1115,7 @@ export function App() {
           <span className="brand-mark">H</span>
           <span>
             <strong>MINESWEEPER</strong>
-            <small>COMPETITIVE PROTOCOL / 0.1</small>
+            <small>PROFESSIONAL SOLO / ALPHA</small>
           </span>
         </button>
         <div className="topbar-status" aria-live="polite">
@@ -916,7 +1138,7 @@ export function App() {
             onClick={() => {
               const next = nextMotionPreference(motionPreference);
               setMotionPreference(next);
-              window.localStorage.setItem(MOTION_PREFERENCE_KEY, next);
+              safeLocalStorageSet(MOTION_PREFERENCE_KEY, next);
             }}
           >
             动效：
@@ -935,7 +1157,7 @@ export function App() {
               const next = nextEffectsProfile(effectsPreference);
               setEffectsPreference(next);
               setSessionEffects(next);
-              window.localStorage.setItem(EFFECTS_PROFILE_KEY, next);
+              safeLocalStorageSet(EFFECTS_PROFILE_KEY, next);
             }}
           >
             特效：
@@ -948,7 +1170,7 @@ export function App() {
         </div>
       </header>
 
-      <main>
+      <main id="main-content" tabIndex={-1}>
         {localMode === "solo" ? (
           <SoloGame
             key={`solo-${soloLaunchMode}`}
@@ -963,10 +1185,12 @@ export function App() {
             onExit={exitLocalMode}
             onOpenSolo={openSoloFromAcademy}
           />
-        ) : phase === "HOME" ? (
-          <section className={`home-grid home-mode-${homeMode}`}>
+        ) : phase === "HOME" || !DUEL_EXPERIMENT_ENABLED ? (
+          <section
+            className={`home-grid home-mode-${homeMode}${DUEL_EXPERIMENT_ENABLED ? "" : " duel-experiment-disabled"}`}
+          >
             <div
-              className={`duel-hero-visual${homeMode === "duel" ? " is-active" : ""}`}
+              className={`duel-hero-visual${DUEL_EXPERIMENT_ENABLED && homeMode === "duel" ? " is-active" : ""}`}
               aria-hidden="true"
             >
               <img
@@ -990,14 +1214,14 @@ export function App() {
             >
               <p className="eyebrow">
                 {homeMode === "solo"
-                  ? "TRAIN SOLO. RACE TOGETHER."
+                  ? "BUILD A MEMORY. TRAIN THE GAP."
                   : homeMode === "academy"
                     ? "LEARN THE LOGIC. OWN THE BOARD."
                     : "SAME BOARD. SAME CLOCK. NO EXCUSES."}
               </p>
               <h1>
                 {homeMode === "solo" ? (
-                  <>一个人练，<br />和对手赛。</>
+                  <>每一局，<br />都成为下一局的依据。</>
                 ) : homeMode === "academy" ? (
                   <>看懂每一步，<br />再把速度练成本能。</>
                 ) : (
@@ -1007,8 +1231,8 @@ export function App() {
               <p className="hero-description">
                 {homeMode === "solo" ? (
                   <>
-                    从经典单人扫雷开始，随时进入同图实时对抗。没有随机攻击，
-                    没有数值道具，只有判断、节奏和执行。
+                    用可信的本地历史看见速度、效率与无效动作的变化。
+                    数据留在本机；完成、复盘、调整，再开下一局。
                   </>
                 ) : homeMode === "academy" ? (
                   <>
@@ -1026,8 +1250,8 @@ export function App() {
                 {homeMode === "solo" ? (
                   <>
                     <span><b>01</b> 初 · 中 · 高 · 自定义</span>
-                    <span><b>02</b> 经典随机 / 无猜</span>
-                    <span><b>03</b> 本地零等待</span>
+                    <span><b>02</b> 同规格历史 / PB / 趋势</span>
+                    <span><b>03</b> JSON 导出与本地控制</span>
                   </>
                 ) : homeMode === "academy" ? (
                   <>
@@ -1075,17 +1299,19 @@ export function App() {
                   <strong>扫雷学院</strong>
                   <small>LEARN</small>
                 </button>
-                <button
-                  className="home-mode-option"
-                  type="button"
-                  aria-pressed={homeMode === "duel"}
-                  disabled={busy}
-                  onClick={() => chooseHomeMode("duel")}
-                >
-                  <span>03</span>
-                  <strong>多人对战</strong>
-                  <small>1V1 LIVE</small>
-                </button>
+                {DUEL_EXPERIMENT_ENABLED && (
+                  <button
+                    className="home-mode-option"
+                    type="button"
+                    aria-pressed={homeMode === "duel"}
+                    disabled={busy}
+                    onClick={() => chooseHomeMode("duel")}
+                  >
+                    <span>03</span>
+                    <strong>1v1 实验</strong>
+                    <small>FEATURE FLAG</small>
+                  </button>
+                )}
               </div>
 
               <div
@@ -1102,12 +1328,12 @@ export function App() {
                       单人游戏 · 立即开局
                     </button>
                     <p className="entry-mode-note">
-                      初中高级、自定义尺寸、首击安全，无需连接服务器。
+                      完成终局后写入版本化本地历史；刷新或重启浏览器后仍可复盘。
                     </p>
                     <div className="entry-feature-list" aria-label="单人模式能力">
                       <span>首击 3×3 安全</span>
                       <span>经典随机 / 无猜</span>
-                      <span>本地即时响应</span>
+                      <span>同规格可信趋势</span>
                     </div>
                   </>
                 ) : homeMode === "academy" ? (
@@ -1171,7 +1397,7 @@ export function App() {
                       </button>
                     </div>
                     <p className="privacy-note">
-                      阶段 0 不创建账号；昵称和比赛回放只存在于当前服务进程。
+                      实验功能可独立关闭；任何 1v1 故障都不阻塞专业单人 Alpha。
                     </p>
                   </>
                 )}
@@ -1215,6 +1441,20 @@ export function App() {
                   <p className="eyebrow">PRIVATE DUEL / {roomCode}</p>
                   <h1>等待两名玩家锁定席位</h1>
                   <p>分享房间码。双方准备后，服务器统一启动三秒倒计时。</p>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard
+                        .writeText(duelInviteUrl(roomCode))
+                        .then(
+                          () => setNotice("邀请链接已复制；打开后会自动预填房间码。"),
+                          () => setError("邀请链接复制失败，请手动分享房间码。"),
+                        );
+                    }}
+                  >
+                    复制邀请链接
+                  </button>
                   <div className="seat-grid">
                     {[1, 2].map((seat) => {
                       const player = players.find((entry) => entry.seat === seat);
@@ -1283,7 +1523,12 @@ export function App() {
                     </div>
                   )}
                   {(phase === "ROUND_RESULT" || phase === "MATCH_RESULT") && result && (
-                    <div className="result-overlay">
+                    <div
+                      className="result-overlay"
+                      role="status"
+                      aria-live="assertive"
+                      aria-atomic="true"
+                    >
                       <span className="panel-kicker">
                         {phase === "MATCH_RESULT" ? "MATCH COMPLETE" : "ROUND COMPLETE"}
                       </span>

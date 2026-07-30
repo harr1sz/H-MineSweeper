@@ -10,12 +10,20 @@ interface StoredGuestSession {
   readonly expiresAt: number;
 }
 
+export class CapacityError extends Error {
+  constructor(readonly resource: "guest_sessions" | "rooms") {
+    super(`${resource} capacity has been reached`);
+    this.name = "CapacityError";
+  }
+}
+
 export class GuestSessionStore {
   readonly #byToken = new Map<string, StoredGuestSession>();
 
   constructor(
     private readonly ttlMs: number,
     private readonly now: () => number = Date.now,
+    private readonly maxSessions = Number.POSITIVE_INFINITY,
   ) {}
 
   get size(): number {
@@ -23,10 +31,13 @@ export class GuestSessionStore {
   }
 
   create(rawDisplayName: string): GuestSession {
-    this.purgeExpired();
+    this.sweepExpired();
     const displayName = rawDisplayName.trim().replace(/\s+/g, " ");
     if (displayName.length < 1 || displayName.length > 24) {
       throw new RangeError("Display name must contain 1 to 24 characters");
+    }
+    if (this.#byToken.size >= this.maxSessions) {
+      throw new CapacityError("guest_sessions");
     }
 
     const session: GuestSession = {
@@ -42,11 +53,11 @@ export class GuestSessionStore {
   }
 
   get(guestToken: string): GuestSession | undefined {
-    this.purgeExpired();
+    this.sweepExpired();
     return this.#byToken.get(guestToken)?.session;
   }
 
-  private purgeExpired(): void {
+  sweepExpired(): void {
     const now = this.now();
     for (const [token, stored] of this.#byToken) {
       if (stored.expiresAt <= now) this.#byToken.delete(token);
@@ -82,7 +93,7 @@ export class TicketStore {
   }
 
   issue(roomId: string, guestId: string): TicketClaims {
-    this.purgeExpired();
+    this.sweepExpired();
     const now = this.now();
     const epochKey = `${roomId}:${guestId}`;
     const previousEpoch = this.#epochs.get(epochKey)?.value ?? 0;
@@ -107,7 +118,7 @@ export class TicketStore {
   }
 
   consume(ticket: string): TicketClaims | undefined {
-    this.purgeExpired();
+    this.sweepExpired();
     const stored = this.#tickets.get(ticket);
     if (!stored || stored.used) return undefined;
 
@@ -121,7 +132,7 @@ export class TicketStore {
     };
   }
 
-  private purgeExpired(): void {
+  sweepExpired(): void {
     const now = this.now();
     for (const [ticket, stored] of this.#tickets) {
       if (stored.expiresAt <= now) this.#tickets.delete(ticket);

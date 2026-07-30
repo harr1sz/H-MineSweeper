@@ -1,17 +1,24 @@
 {
   "name": "h-minesweeper",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.1",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.9.0",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "pnpm -r --parallel --stream --filter './apps/*' dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && pnpm test:scripts",
+    "test:scripts": "node --test scripts/release-probe-lib.test.mjs",
+    "test:release-probes": "node --test scripts/release-probe-lib.test.mjs",
+    "probe:synthetic": "node scripts/synthetic-probe.mjs",
+    "probe:synthetic:telemetry": "node scripts/synthetic-probe.mjs --mode=telemetry",
+    "smoke:release": "node scripts/release-smoke.mjs",
+    "verify:rollback": "node scripts/verify-rollback.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeChangedIndexes,
+  resolveBoardAvailableWidth,
   resolveBoardMarkMetrics,
   resolveBoardPalette,
   resolveCanvasPixelRatio,
+  resolveResponsiveCellSize,
   shouldRedrawWholeBoard,
 } from "./CanvasBoard";
 
@@ -57,6 +59,23 @@ describe("CanvasBoard rendering helpers", () => {
       iconSize: 14,
       iconLineWidth: 1.5,
     });
+  });
+
+  it("fits a beginner board inside 320–390px phone layouts", () => {
+    const widths = [296, 351, 366];
+    for (const viewportWidth of widths) {
+      const available = resolveBoardAvailableWidth(viewportWidth, 14, 14);
+      const cellSize = resolveResponsiveCellSize(available, 9, true);
+      expect(cellSize * 9).toBeLessThanOrEqual(available);
+      expect(cellSize).toBeGreaterThanOrEqual(24);
+    }
+  });
+
+  it("keeps large touch boards pannable without forcing page overflow", () => {
+    const available = resolveBoardAvailableWidth(351, 14, 14);
+    expect(resolveResponsiveCellSize(available, 16, true)).toBe(32);
+    expect(resolveResponsiveCellSize(available, 30, true)).toBe(32);
+    expect(resolveResponsiveCellSize(900, 30, false)).toBe(30);
   });
 
   it("caps high-DPI backing stores for large two-layer boards", () => {
