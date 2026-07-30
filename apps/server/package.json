@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "H_MINESWEEPER_DUEL_EXPERIMENT=true tsx watch src/index.ts",
     "build": "tsup --config tsup.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

@@ -64,7 +64,8 @@ H-MineSweeper 是一个黑金风格的专业单人扫雷训练项目。单人训
 当前 1v1 使用 `client_seed`。客户端即时展开棋盘，服务端独立复算动作和结果。这套模式适合测试手感，但无法提供正式排行榜所需的反作弊强度。只有协议解码、可靠序号、截止点回滚、Replay 预算和真实双端闸门全部通过时，`duelExperiment` 才能打开；失败时关闭入口，单人 Alpha 继续。
 
 网页入口和服务端传输分别由 `VITE_DUEL_EXPERIMENT` 与
-`H_MINESWEEPER_DUEL_EXPERIMENT` 控制，二者均默认关闭。服务端关闭时，
+`H_MINESWEEPER_DUEL_EXPERIMENT` 控制。仓库提供的开发与部署配置默认开启，
+也可独立关闭；服务端缺少显式配置时仍会安全关闭。服务端关闭时，
 guest、room、Replay 和 WebSocket 路径不可用，但公开单人和本地历史继续运行。仅影响 1v1 的事故只关闭 1v1，不暂停健康单人。
 
 ### 操作
@@ -233,8 +234,10 @@ Each player solves the same Expert no-guess board in a separate view. Players do
 The current 1v1 mode uses `client_seed`. The client reveals cells immediately while the server recomputes actions and results. This is useful for testing responsiveness, but it does not provide the anti-cheat guarantees needed for an official leaderboard. `duelExperiment` can be enabled only after protocol decoding, reliable sequencing, deadline rollback, replay-budget, and real two-client gates pass. A failure keeps 1v1 off without blocking the solo Alpha.
 
 The browser entry and server transport are controlled independently by
-`VITE_DUEL_EXPERIMENT` and `H_MINESWEEPER_DUEL_EXPERIMENT`; both default to
-off. With the server flag off, guest, room, replay, and WebSocket surfaces are
+`VITE_DUEL_EXPERIMENT` and `H_MINESWEEPER_DUEL_EXPERIMENT`. The repository's
+development and deployment configuration enables both by default and either can
+be disabled independently; the server still fails closed when the variable is
+missing. With the server flag off, guest, room, replay, and WebSocket surfaces are
 unavailable while public solo and local history continue. A duel-only incident
 turns off 1v1 and does not pause healthy solo.
 
