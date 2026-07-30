@@ -1094,7 +1094,17 @@ export function App() {
     <div
       className={`app-shell effects-${effectsProfile}${reducedMotion ? " reduced-motion" : ""}`}
     >
-      <a className="skip-link" href="#main-content">
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={(event) => {
+          const target = document.getElementById("main-content");
+          if (!target) return;
+          event.preventDefault();
+          target.focus();
+          event.currentTarget.blur();
+        }}
+      >
         跳到主要内容
       </a>
       <header className="topbar">

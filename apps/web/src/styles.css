@@ -81,7 +81,7 @@ canvas:focus-visible {
   transform: translateY(-160%);
 }
 
-.skip-link:focus {
+.skip-link:focus-visible {
   transform: translateY(0);
 }
 
