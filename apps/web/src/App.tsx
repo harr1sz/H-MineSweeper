@@ -355,7 +355,6 @@ export function App() {
       }
       downgraded = true;
       setSessionEffects((current) => downgradeEffects(current));
-      setNotice("已降低装饰效果以保持操作响应。");
     });
     try {
       observer.observe({ type: "longtask" });
@@ -413,7 +412,6 @@ export function App() {
       }
       downgraded = true;
       setSessionEffects((current) => downgradeEffects(current));
-      setNotice("检测到输入或动画帧预算回退，已降低装饰效果。");
     }, 2_000);
     return () => window.clearInterval(timer);
   }, [effectsProfile, reducedMotion]);
