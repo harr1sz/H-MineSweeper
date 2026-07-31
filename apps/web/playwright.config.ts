@@ -24,7 +24,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "VITE_TELEMETRY_ENABLED=false node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173",
+      "VITE_TELEMETRY_ENABLED=false VITE_DUEL_EXPERIMENT=true node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173",
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,

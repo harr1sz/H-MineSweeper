@@ -45,6 +45,13 @@ window length, version boundaries, missing-data treatment, and Go/revise/stop
 thresholds. These rules must not be backfilled or re-scored after seeing
 results.
 
+An Alpha RC must carry a completed release-evidence document validated by
+`pnpm verify:release-candidate`. The evidence records the immutable artifacts,
+clean CI and anonymous smoke receipts, the prepublished metric policy, and one
+of the two accepted deletion-safe rollback proofs. A passing validator is a
+contract check, not permission to invent missing observations or rehearse
+production operations on paper.
+
 Pseudonymous raw telemetry and public-session state have a fixed seven-day
 retention period. The retention period is not extended for analysis. Any
 product question that needs a longer identifiable window must be answered with

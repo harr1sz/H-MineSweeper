@@ -7,4 +7,4 @@ export const BUILD_REGION =
 export const TELEMETRY_ENABLED =
   import.meta.env.VITE_TELEMETRY_ENABLED === "true";
 export const DUEL_EXPERIMENT_ENABLED =
-  import.meta.env.VITE_DUEL_EXPERIMENT !== "false";
+  import.meta.env.VITE_DUEL_EXPERIMENT === "true";
