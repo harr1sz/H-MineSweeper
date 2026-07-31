@@ -257,7 +257,7 @@ main {
   z-index: 2;
 }
 
-.duel-hero-visual {
+.home-hero-visual {
   position: absolute;
   z-index: 0;
   top: 0;
@@ -265,27 +265,52 @@ main {
   left: 50%;
   width: 100vw;
   overflow: hidden;
-  opacity: 0;
+  opacity: 1;
   pointer-events: none;
   transform: translateX(-50%);
-  transition: opacity 180ms ease;
 }
 
-.duel-hero-visual::after {
+.home-hero-visual::after {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, #070708 0%, rgb(7 7 8 / 86%) 35%, transparent 70%),
+    linear-gradient(90deg, #070708 0%, rgb(7 7 8 / 88%) 36%, transparent 72%),
     linear-gradient(180deg, rgb(7 7 8 / 38%), transparent 30% 72%, #070708);
   content: "";
 }
 
-.duel-hero-visual.is-active {
-  opacity: 1;
+.home-mode-board {
+  position: absolute;
+  display: block;
+  top: 50%;
+  right: -3vw;
+  width: min(68vw, 960px);
+  opacity: 0;
+  user-select: none;
+  animation: home-background-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-.duel-grid-layer,
-.duel-board-layer {
+.home-hero-visual.mode-solo .home-mode-board {
+  filter: brightness(1.04) saturate(1.04);
+}
+
+.home-hero-visual.mode-academy .home-mode-board {
+  filter: brightness(0.98) saturate(0.94);
+}
+
+@keyframes home-background-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(26px, -48%, 0) scale(0.985);
+  }
+
+  to {
+    opacity: 0.9;
+    transform: translate3d(0, -50%, 0) scale(1);
+  }
+}
+
+.duel-grid-layer {
   position: absolute;
   display: block;
   max-width: none;
@@ -300,24 +325,13 @@ main {
   opacity: 0.78;
 }
 
-.duel-board-layer {
-  top: 50%;
-  right: -3vw;
-  width: min(68vw, 960px);
-  opacity: 0.68;
-  filter: brightness(1.12) saturate(1.16) contrast(1.08);
-  transform: translate3d(36px, -48%, 0) scale(0.985);
-  transition:
-    opacity 260ms ease,
-    transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.duel-hero-visual.is-active .duel-board-layer {
+.home-hero-visual.mode-duel .home-mode-board {
   opacity: 0.92;
+  filter: brightness(1.12) saturate(1.16) contrast(1.08);
   transform: translate3d(0, -50%, 0) scale(1);
 }
 
-.effects-full .duel-hero-visual.is-active .duel-board-layer {
+.effects-full .home-hero-visual.mode-duel .home-mode-board {
   animation: duel-board-drift 9s ease-in-out 600ms infinite alternate;
 }
 
@@ -866,16 +880,23 @@ input:focus {
   transition: none;
 }
 
-.app-shell.reduced-motion .duel-hero-visual,
-.app-shell.reduced-motion .duel-board-layer,
-.effects-essential .duel-hero-visual,
-.effects-essential .duel-board-layer {
+.app-shell.reduced-motion .home-hero-visual,
+.effects-essential .home-hero-visual,
+.app-shell.reduced-motion .home-mode-board,
+.effects-essential .home-mode-board {
   transition: none;
 }
 
-.app-shell.reduced-motion .duel-hero-visual.is-active .duel-board-layer,
-.effects-lite .duel-hero-visual.is-active .duel-board-layer,
-.effects-essential .duel-hero-visual.is-active .duel-board-layer {
+.app-shell.reduced-motion .home-mode-board,
+.effects-essential .home-mode-board {
+  animation: none;
+  opacity: 0.9;
+  transform: translate3d(0, -50%, 0) scale(1);
+}
+
+.app-shell.reduced-motion .home-hero-visual.mode-duel .home-mode-board,
+.effects-lite .home-hero-visual.mode-duel .home-mode-board,
+.effects-essential .home-hero-visual.mode-duel .home-mode-board {
   animation: none;
 }
 
@@ -1450,13 +1471,13 @@ footer {
     padding: 56px 0;
   }
 
-  .duel-board-layer {
+  .home-mode-board {
     top: 36%;
     right: -32vw;
     width: min(112vw, 920px);
   }
 
-  .duel-hero-visual.is-active .duel-board-layer {
+  .home-hero-visual.mode-duel .home-mode-board {
     opacity: 0.56;
   }
 
@@ -1514,13 +1535,13 @@ footer {
     opacity: 0.56;
   }
 
-  .duel-board-layer {
+  .home-mode-board {
     top: 61%;
     right: -80vw;
     width: 175vw;
   }
 
-  .duel-hero-visual.is-active .duel-board-layer {
+  .home-hero-visual.mode-duel .home-mode-board {
     opacity: 0.42;
   }
 
@@ -1764,10 +1785,6 @@ footer {
 .danger-button {
   border-color: rgba(255, 103, 103, 0.55);
   color: #ffb5b5;
-}
-
-.duel-experiment-disabled .home-mode-switch {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (max-width: 480px) {

@@ -1197,7 +1197,8 @@ export function App() {
             className={`home-grid home-mode-${homeMode}${DUEL_EXPERIMENT_ENABLED ? "" : " duel-experiment-disabled"}`}
           >
             <div
-              className={`duel-hero-visual${homeMode === "duel" ? " is-active" : ""}`}
+              className={`home-hero-visual mode-${homeMode}`}
+              data-testid="home-hero-visual"
               aria-hidden="true"
             >
               <img
@@ -1207,8 +1208,14 @@ export function App() {
                 draggable={false}
               />
               <img
-                className="duel-board-layer"
-                src="/hero-board-h-v2.svg"
+                className="home-mode-board"
+                src={
+                  homeMode === "solo"
+                    ? "/hero-solo-verified-v1.svg"
+                    : homeMode === "academy"
+                      ? "/hero-academy-verified-v1.svg"
+                      : "/hero-board-h-v2.svg"
+                }
                 alt=""
                 draggable={false}
               />
