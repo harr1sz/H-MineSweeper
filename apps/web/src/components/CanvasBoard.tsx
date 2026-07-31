@@ -288,6 +288,13 @@ export function shouldRedrawWholeBoard(
   );
 }
 
+export function canDoubleClickChord(
+  visibility: number,
+  adjacent: number,
+): boolean {
+  return visibility === REVEALED && adjacent > 0;
+}
+
 export function resolveCanvasPixelRatio(
   cssWidth: number,
   cssHeight: number,
@@ -1246,6 +1253,8 @@ export function CanvasBoard({
 
   const handleMouseDown = (event: ReactMouseEvent<HTMLCanvasElement>) => {
     if (disabled || !game) return;
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
     const index = cellFromPointer(
       event.currentTarget,
       event.nativeEvent,
@@ -1283,6 +1292,7 @@ export function CanvasBoard({
     }
     if (index === null || disabled || !game) return;
     if (event.button === 0) {
+      if (game.visibility[index] === REVEALED) return;
       runAction("REVEAL", index, { physicalClicks: 1, source: "mouse" });
     }
     if (event.button === 1) {
@@ -1294,6 +1304,32 @@ export function CanvasBoard({
         source: "mouse",
       });
     }
+  };
+
+  const handleDoubleClick = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (disabled || !game || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+    const index = cellFromPointer(
+      event.currentTarget,
+      event.nativeEvent,
+      width,
+      height,
+    );
+    if (
+      index === null ||
+      !canDoubleClickChord(
+        game.visibility[index] ?? HIDDEN,
+        game.board.adjacent[index] ?? 0,
+      )
+    ) {
+      return;
+    }
+    setFocusIndex(index);
+    runAction("CHORD", index, {
+      physicalClicks: 2,
+      source: "mouse",
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
@@ -1400,8 +1436,9 @@ export function CanvasBoard({
             className={`mine-board${disabled ? " is-disabled" : ""}${reducedMotion ? " reduced-motion" : ""}`}
             role="grid"
             tabIndex={0}
-            aria-label={`${width} 乘 ${height} 扫雷棋盘。${focusedCellLabel}。方向键移动，回车揭格，F 插旗，C 和弦。`}
+            aria-label={`${width} 乘 ${height} 扫雷棋盘。${focusedCellLabel}。方向键移动，回车揭格，F 插旗，C 或双击数字格和弦。`}
             onContextMenu={(event) => event.preventDefault()}
+            onDoubleClick={handleDoubleClick}
             onKeyDown={handleKeyDown}
             onMouseDown={handleMouseDown}
             onMouseLeave={(event) => {

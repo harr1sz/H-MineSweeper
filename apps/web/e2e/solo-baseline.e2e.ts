@@ -8,12 +8,18 @@ const FIXED_SEED = `solo-v1-${FIXED_NOW.toString(36)}-${Array.from(
   () => FIXED_RANDOM_WORD.toString(16).padStart(8, "0"),
 ).join("")}`;
 
-async function enterSolo(page: Page): Promise<void> {
+async function enterSoloSetup(page: Page): Promise<void> {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "单人游戏 · 立即开局" }),
+    page.getByRole("button", { name: "单人游戏 · 配置开局" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "单人游戏 · 立即开局" }).click();
+  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
+  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
+}
+
+async function enterSolo(page: Page): Promise<void> {
+  await enterSoloSetup(page);
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
 }
 
@@ -135,14 +141,14 @@ test("等效 200% 缩放的 640 CSS 像素视口保持 reflow", async ({ page })
     page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "返回模式选择" }),
+    page.getByRole("button", { name: "更改配置" }),
   ).toBeVisible();
   await expectNoPageHorizontalOverflow(page);
 });
 
 test("刷新后恢复本地单人偏好", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await enterSolo(page);
+  await enterSoloSetup(page);
 
   const expert = page
     .locator(".solo-tabs")
@@ -152,10 +158,13 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .getByRole("group", { name: "统计数据层级" })
     .getByRole("button", { name: "分析" })
     .click();
+
   await page
     .getByRole("group", { name: "棋盘显示方案" })
     .getByRole("button", { name: "高对比" })
     .click();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
 
   await expect
     .poll(() =>
@@ -166,7 +175,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .not.toBeNull();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
   await expect(expert).toHaveClass(/is-active/);
   await expect(
     page
@@ -178,6 +187,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
       .getByRole("group", { name: "棋盘显示方案" })
       .getByRole("button", { name: "高对比" }),
   ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(
     page.getByRole("grid", { name: /^30 乘 16 扫雷棋盘/ }),
   ).toBeVisible();
@@ -207,13 +217,17 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
   await expect(page.locator(".solo-history-list article")).toHaveCount(1);
 
   await page.reload();
+  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
   await expect(page.locator(".solo-history-list article")).toHaveCount(1);
 
+  await page.getByRole("button", { name: "更改配置" }).click();
   await page
     .locator(".solo-tabs")
     .getByRole("button", { name: /^高级 30×16/ })
     .click();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(
     page.getByRole("button", { name: "当前配置 · 0" }),
   ).toBeVisible();
@@ -273,8 +287,9 @@ test("无猜生成超过五秒后回退，不制造终局记录", async ({ page 
       value: NeverRespondingWorker,
     });
   });
-  await enterSolo(page);
+  await enterSoloSetup(page);
   await page.getByRole("button", { name: "无猜模式" }).click();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await clickBoardCell(page, 40, 9, 9);
   await expect(page.getByText("生成无猜棋盘")).toBeVisible();
   await expect(
@@ -429,6 +444,8 @@ test("旧版 PB 幂等迁移为独立元数据，坏值可恢复且不进入趋�
   );
 
   await page.reload();
+  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
   await expect(page.getByText(/已保留 1 条旧版 PB 为只读 legacy/)).toBeVisible();
   const secondMetadata = await page.evaluate(async () => {
@@ -476,6 +493,8 @@ test("损坏历史保留原文并从趋势中隔离", async ({ page }) => {
     });
   });
   await page.reload();
+  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(
     page.getByText(/检测到 1 条损坏或未知版本记录/),
   ).toBeVisible();
