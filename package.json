@@ -10,15 +10,17 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel --stream --filter './apps/*' dev",
+    "dev:duel": "H_MINESWEEPER_DUEL_EXPERIMENT=true VITE_DUEL_EXPERIMENT=true pnpm -r --parallel --stream --filter './apps/*' dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test && pnpm test:scripts",
-    "test:scripts": "node --test scripts/release-probe-lib.test.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs",
     "test:release-probes": "node --test scripts/release-probe-lib.test.mjs",
     "probe:synthetic": "node scripts/synthetic-probe.mjs",
     "probe:synthetic:telemetry": "node scripts/synthetic-probe.mjs --mode=telemetry",
     "smoke:release": "node scripts/release-smoke.mjs",
     "verify:rollback": "node scripts/verify-rollback.mjs",
+    "verify:release-candidate": "node scripts/verify-release-candidate.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

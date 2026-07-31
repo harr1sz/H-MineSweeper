@@ -46,6 +46,22 @@ previous_artifact=
 Build once. Deploy the immutable artifact that was tested; do not rebuild from
 an unrecorded working tree.
 
+Before calling an artifact an Alpha RC, copy
+`docs/alpha-release-evidence.example.json` outside the repository, replace
+every placeholder with durable evidence, remove `exampleOnly`, and run:
+
+```bash
+pnpm verify:release-candidate -- \
+  --evidence=/absolute/path/to/alpha-release-evidence.json
+```
+
+The checked-in example is deliberately invalid and cannot be used as release
+evidence. The gate rejects a duel-enabled public release, mutable image tags,
+metrics published after observation begins, missing decision rules, missing
+clean-CI or anonymous-smoke receipts, and rollback evidence that cannot prove
+deleted telemetry stays deleted. Passing validates the evidence contract; it
+does not perform the deployment, observation, backup, or restore rehearsal.
+
 ## Reference topology
 
 The intended single-region topology is:
@@ -202,15 +218,20 @@ against the deployed immutable artifact.
 ## Deployment
 
 1. Confirm the previous immutable artifact is available.
-2. Confirm storage backup and free-space thresholds.
-3. Confirm the frozen artifact passed anonymous public-access smoke.
-4. Deploy the recorded artifact to the single Alpha region.
-5. Wait for `/ready`; bad readiness blocks network-dependent surfaces.
-6. Run browser smoke against production from a clean profile.
-7. Start the stateless regional synthetic probe for the Americas, Europe, and
+2. Confirm the deletion-safe rollback method has a durable receipt.
+3. Confirm storage backup and free-space thresholds.
+4. Confirm the frozen metric policy was published before its observation
+   window.
+5. Confirm the frozen artifact passed clean CI and anonymous public-access
+   smoke.
+6. Run `pnpm verify:release-candidate` against the completed evidence file.
+7. Deploy the recorded artifact to the single Alpha region.
+8. Wait for `/ready`; bad readiness blocks network-dependent surfaces.
+9. Run browser smoke against production from a clean profile.
+10. Start the stateless regional synthetic probe for the Americas, Europe, and
    East Asia; separately schedule the explicit telemetry lifecycle probe at its
    lower frequency.
-8. Publish a GitHub prerelease with the identity block, migrations, flags,
+11. Publish a GitHub prerelease with the identity block, migrations, flags,
    known limitations, and rollback command.
 
 Repository artifacts do not perform deployment. Starting containers, changing

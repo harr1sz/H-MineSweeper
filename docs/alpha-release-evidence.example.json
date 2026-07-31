@@ -1,0 +1,66 @@
+{
+  "exampleOnly": true,
+  "schemaVersion": 1,
+  "release": {
+    "releaseTag": "v0.2.0-alpha.2",
+    "appVersion": "0.2.0-alpha.2",
+    "commitSha": "<full 40-character commit SHA>",
+    "protocolVersion": 2,
+    "localSchemaVersion": "HMS-local-history-v1",
+    "serverSchemaVersion": 4,
+    "region": "<single deployment region>",
+    "publicAccess": true,
+    "publicTelemetry": true,
+    "duelExperiment": false,
+    "serverImage": "<registry/name@sha256:digest>",
+    "webImage": "<registry/name@sha256:digest>"
+  },
+  "metrics": {
+    "policyVersion": "<published metric policy version>",
+    "publishedAt": "<ISO-8601 timestamp before observationStart>",
+    "observationStart": "<ISO-8601 timestamp>",
+    "observationEnd": "<ISO-8601 timestamp>",
+    "minimumMeasurableSample": 0,
+    "eligibleTraffic": "<exact eligible public traffic>",
+    "eligibleVersions": [
+      "v0.2.0-alpha.2"
+    ],
+    "exclusions": [
+      "<predeclared exclusion>"
+    ],
+    "syntheticExclusions": [
+      "synthetic-probe-v1"
+    ],
+    "missingDataTreatment": "<treatment without backfill or imputation>",
+    "metricDefinitions": [
+      {
+        "id": "<stable metric id>",
+        "formula": "<exact formula>",
+        "denominator": "<exact denominator>"
+      }
+    ],
+    "decisionThresholds": {
+      "go": "<predeclared go rule>",
+      "revise": "<predeclared revise rule>",
+      "stop": "<predeclared stop rule>"
+    }
+  },
+  "rollback": {
+    "previousServerImage": "<previous registry/name@sha256:digest>",
+    "previousWebImage": "<previous registry/name@sha256:digest>",
+    "telemetryDataKeyContinuityConfirmed": false,
+    "storageSnapshotIncludesWal": false,
+    "deletionSafety": {
+      "method": "<previous_artifact_compatibility or restore_rehearsal>",
+      "completedAt": "<ISO-8601 timestamp>",
+      "receipt": "<durable evidence URL or path>",
+      "previousArtifactOpenedCurrentSchema": false,
+      "restoreRehearsalCompleted": false,
+      "deletedTelemetryResurrectionCount": -1
+    }
+  },
+  "checks": {
+    "cleanCiReceipt": "<CI run URL>",
+    "anonymousSmokeReceipt": "<deployed anonymous smoke receipt URL or path>"
+  }
+}
