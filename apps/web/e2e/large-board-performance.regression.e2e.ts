@@ -8,7 +8,7 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   // Report: .gstack/qa-reports/qa-report-desktop-2026-07-31.md
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await page.getByRole("button", { name: "单人游戏 · 立即开局" }).click();
+  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
   await page
     .locator(".solo-tabs")
     .getByRole("button", { name: /^自定义 5–100/ })
@@ -16,7 +16,7 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   await page.getByLabel("自定义宽度").fill("100");
   await page.getByLabel("自定义高度").fill("100");
   await page.getByLabel("自定义雷数").fill("999");
-  await page.getByRole("button", { name: "应用自定义" }).click();
+  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
   await expect(
     page.getByRole("grid", { name: /^100 乘 100 扫雷棋盘/ }),
   ).toBeVisible();
@@ -27,10 +27,12 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   });
   const themes = ["专业", "高对比", "舒适"];
   for (const [index, theme] of themes.entries()) {
+    await page.getByRole("button", { name: "更改配置" }).click();
     await page
       .getByRole("group", { name: "棋盘显示方案" })
       .getByRole("button", { name: theme })
       .click();
+    await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
     await expect
       .poll(() =>
         page.evaluate(

@@ -364,6 +364,7 @@ export function SoloGame({
   const [config, setConfig] = useState<SoloBoardConfig>(initialConfig);
   const [preset, setPreset] = useState<SoloPreset>(initialPreset);
   const [mode, setMode] = useState<SoloGenerationMode>(launchMode);
+  const [setupComplete, setSetupComplete] = useState(false);
   const [status, setStatus] = useState<SoloStatus>("READY");
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
@@ -961,6 +962,38 @@ export function SoloGame({
     persistPreferences(nextConfig, "custom");
   };
 
+  const chooseCustom = () => {
+    setPreset("custom");
+    setNotice("输入宽度、高度和雷数；开始本局前会再次校验。");
+  };
+
+  const startConfiguredGame = () => {
+    const nextConfig: SoloBoardConfig =
+      preset === "custom"
+        ? {
+            width: Number(draftWidth),
+            height: Number(draftHeight),
+            mines: Number(draftMines),
+            mode,
+          }
+        : config;
+    const error = getSoloConfigError(nextConfig);
+    if (error) {
+      setNotice(error);
+      return;
+    }
+    resetBoard(nextConfig, preset);
+    persistPreferences(nextConfig, preset);
+    setSetupComplete(true);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  };
+
+  const returnToSetup = () => {
+    resetBoard(config, preset);
+    setSetupComplete(false);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  };
+
   const exitSolo = () => {
     cancelGeneration();
     onExit();
@@ -1170,8 +1203,208 @@ export function SoloGame({
           : status === "WON"
             ? "已完成"
             : "已触雷";
-  const configurationLocked =
-    status === "PLAYING" || status === "GENERATING";
+  if (!setupComplete) {
+    return (
+      <section className="solo-shell solo-setup-shell">
+        <div className="solo-header solo-setup-header">
+          <div>
+            <span className="panel-kicker">LOCAL / RUN CONFIGURATION</span>
+            <h1>配置单人训练</h1>
+            <p>先确定棋盘、生成规则和数据密度。进入对局后，界面只保留棋盘与本局信息。</p>
+          </div>
+          <button className="secondary-button solo-exit" type="button" onClick={exitSolo}>
+            返回模式选择
+          </button>
+        </div>
+
+        <div className="solo-setup-panel" aria-label="单人开局配置">
+          <div className="solo-setup-section">
+            <div className="solo-setup-heading">
+              <span>01</span>
+              <div>
+                <strong>棋盘规格</strong>
+                <small>选择预设，或定义宽、高和雷数。</small>
+              </div>
+            </div>
+            <div className="solo-tabs">
+              {(Object.keys(PRESET_LABELS) as Array<Exclude<SoloPreset, "custom">>).map(
+                (key) => (
+                  <button
+                    className={`solo-tab${preset === key ? " is-active" : ""}`}
+                    key={key}
+                    type="button"
+                    onClick={() => choosePreset(key)}
+                  >
+                    {PRESET_LABELS[key]}
+                    <small>
+                      {SOLO_PRESETS[key].width}×{SOLO_PRESETS[key].height} /{" "}
+                      {SOLO_PRESETS[key].mines}
+                    </small>
+                  </button>
+                ),
+              )}
+              <button
+                className={`solo-tab${preset === "custom" ? " is-active" : ""}`}
+                type="button"
+                onClick={chooseCustom}
+              >
+                自定义
+                <small>5–100 / ≤10K</small>
+              </button>
+            </div>
+            <div className={`solo-custom-grid${preset === "custom" ? " is-enabled" : ""}`}>
+              <label>
+                <span>宽</span>
+                <input
+                  aria-label="自定义宽度"
+                  inputMode="numeric"
+                  max="100"
+                  min="5"
+                  type="number"
+                  disabled={preset !== "custom"}
+                  value={draftWidth}
+                  onChange={(event) => setDraftWidth(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>高</span>
+                <input
+                  aria-label="自定义高度"
+                  inputMode="numeric"
+                  max="100"
+                  min="5"
+                  type="number"
+                  disabled={preset !== "custom"}
+                  value={draftHeight}
+                  onChange={(event) => setDraftHeight(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>雷</span>
+                <input
+                  aria-label="自定义雷数"
+                  inputMode="numeric"
+                  min="1"
+                  type="number"
+                  disabled={preset !== "custom"}
+                  value={draftMines}
+                  onChange={(event) => setDraftMines(event.target.value)}
+                />
+              </label>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={preset !== "custom"}
+                onClick={applyCustom}
+              >
+                校验自定义
+              </button>
+            </div>
+          </div>
+
+          <div className="solo-setup-section">
+            <div className="solo-setup-heading">
+              <span>02</span>
+              <div>
+                <strong>生成规则</strong>
+                <small>经典随机立即生成；无猜模式先验证可逻辑解。</small>
+              </div>
+            </div>
+            <div className="solo-mode-tabs">
+              <button
+                className={`solo-mode${mode === "classic" ? " is-active" : ""}`}
+                type="button"
+                onClick={() => chooseMode("classic")}
+              >
+                经典随机
+              </button>
+              <button
+                className={`solo-mode${mode === "no_guess" ? " is-active" : ""}`}
+                type="button"
+                onClick={() => chooseMode("no_guess")}
+              >
+                无猜模式
+              </button>
+            </div>
+          </div>
+
+          <div className="solo-setup-section solo-setup-section-split">
+            <div>
+              <div className="solo-setup-heading">
+                <span>03</span>
+                <div>
+                  <strong>数据层级</strong>
+                  <small>决定对局中展示多少过程指标。</small>
+                </div>
+              </div>
+              <div className="solo-compact-tabs" role="group" aria-label="统计数据层级">
+                {(
+                  [
+                    ["basic", "基础"],
+                    ["advanced", "高级"],
+                    ["analysis", "分析"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    className={statsLevel === value ? "is-active" : ""}
+                    key={value}
+                    type="button"
+                    aria-pressed={statsLevel === value}
+                    onClick={() => chooseStatsLevel(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="solo-setup-heading">
+                <span>04</span>
+                <div>
+                  <strong>棋盘显示</strong>
+                  <small>只改变视觉，不改变棋盘与成绩。</small>
+                </div>
+              </div>
+              <div className="solo-compact-tabs" role="group" aria-label="棋盘显示方案">
+                {(
+                  [
+                    ["black-gold", "舒适"],
+                    ["classic", "专业"],
+                    ["high-contrast", "高对比"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    className={boardTheme === value ? "is-active" : ""}
+                    key={value}
+                    type="button"
+                    aria-pressed={boardTheme === value}
+                    onClick={() => chooseBoardTheme(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="solo-setup-launch">
+            <div>
+              <span>本局方案</span>
+              <strong>
+                {preset === "custom" ? "自定义" : PRESET_LABELS[preset]} ·{" "}
+                {draftWidth}×{draftHeight} / {draftMines} ·{" "}
+                {mode === "no_guess" ? "无猜" : "经典"}
+              </strong>
+              <p role="status">{notice || "配置确认后再创建棋盘，计时从首击开始。"}</p>
+            </div>
+            <button className="primary-button" type="button" onClick={startConfiguredGame}>
+              确认配置 · 进入棋盘
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="solo-shell">
@@ -1192,125 +1425,14 @@ export function SoloGame({
         <div>
           <span className="panel-kicker">LOCAL / SINGLE PLAYER</span>
           <h1>经典扫雷</h1>
-          <p>无需等待对手。首击安全、完整计时，支持经典随机与可验证无猜棋盘。</p>
-        </div>
-        <button className="secondary-button solo-exit" type="button" onClick={exitSolo}>
-          返回模式选择
-        </button>
-      </div>
-
-      <div
-        className="solo-config"
-        aria-label="单人棋盘设置"
-        aria-disabled={configurationLocked}
-      >
-        {configurationLocked && (
-          <p className="solo-config-lock-note" role="status">
-            本局进行中，难度与生成规则已锁定；如需切换，请先选择“放弃并换一张”。
+          <p>
+            {preset === "custom" ? "自定义" : PRESET_LABELS[preset]} · {config.width}×{config.height} / {config.mines} ·{" "}
+            {config.mode === "no_guess" ? "无猜模式" : "经典随机"}
           </p>
-        )}
-        <div className="solo-config-group">
-          <span className="meta-label">难度</span>
-          <div className="solo-tabs">
-            {(Object.keys(PRESET_LABELS) as Array<Exclude<SoloPreset, "custom">>).map(
-              (key) => (
-                <button
-                  className={`solo-tab${preset === key ? " is-active" : ""}`}
-                  key={key}
-                  type="button"
-                  disabled={configurationLocked}
-                  onClick={() => choosePreset(key)}
-                >
-                  {PRESET_LABELS[key]}
-                  <small>
-                    {SOLO_PRESETS[key].width}×{SOLO_PRESETS[key].height} /{" "}
-                    {SOLO_PRESETS[key].mines}
-                  </small>
-                </button>
-              ),
-            )}
-            <button
-              className={`solo-tab${preset === "custom" ? " is-active" : ""}`}
-              type="button"
-              disabled={configurationLocked}
-              onClick={applyCustom}
-            >
-              自定义
-              <small>5–100 / ≤10K</small>
-            </button>
-          </div>
         </div>
-
-        <div className="solo-config-group">
-          <span className="meta-label">生成规则</span>
-          <div className="solo-mode-tabs">
-            <button
-              className={`solo-mode${mode === "classic" ? " is-active" : ""}`}
-              type="button"
-              disabled={configurationLocked}
-              onClick={() => chooseMode("classic")}
-            >
-              经典随机
-            </button>
-            <button
-              className={`solo-mode${mode === "no_guess" ? " is-active" : ""}`}
-              type="button"
-              disabled={configurationLocked}
-              onClick={() => chooseMode("no_guess")}
-            >
-              无猜模式
-            </button>
-          </div>
-        </div>
-
-        <div className="solo-custom-grid">
-          <label>
-            <span>宽</span>
-            <input
-              aria-label="自定义宽度"
-              inputMode="numeric"
-              max="100"
-              min="5"
-              type="number"
-              disabled={configurationLocked}
-              value={draftWidth}
-              onChange={(event) => setDraftWidth(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>高</span>
-            <input
-              aria-label="自定义高度"
-              inputMode="numeric"
-              max="100"
-              min="5"
-              type="number"
-              disabled={configurationLocked}
-              value={draftHeight}
-              onChange={(event) => setDraftHeight(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>雷</span>
-            <input
-              aria-label="自定义雷数"
-              inputMode="numeric"
-              min="1"
-              type="number"
-              disabled={configurationLocked}
-              value={draftMines}
-              onChange={(event) => setDraftMines(event.target.value)}
-            />
-          </label>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={configurationLocked}
-            onClick={applyCustom}
-          >
-            应用自定义
-          </button>
-        </div>
+        <button className="secondary-button solo-exit" type="button" onClick={returnToSetup}>
+          {status === "PLAYING" || status === "GENERATING" ? "结束本局并更改配置" : "更改配置"}
+        </button>
       </div>
 
       <div className="solo-game-layout">
@@ -1322,7 +1444,7 @@ export function SoloGame({
           <div className="board-toolbar">
             <span>左键 REVEAL</span>
             <span>右键 FLAG</span>
-            <span>中键 / 左右键 CHORD</span>
+            <span>中键 / 左右键 / 双击 CHORD</span>
             <span>{config.mode === "no_guess" ? "NO-GUESS" : "CLASSIC"}</span>
             {reviewingTerminalBoard && (
               <button
@@ -1431,29 +1553,6 @@ export function SoloGame({
           </div>
           <div className="solo-clock">{formatSoloTime(elapsedMs)}</div>
 
-          <div className="solo-option-block">
-            <span className="meta-label">数据层级</span>
-            <div className="solo-compact-tabs" role="group" aria-label="统计数据层级">
-              {(
-                [
-                  ["basic", "基础"],
-                  ["advanced", "高级"],
-                  ["analysis", "分析"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  className={statsLevel === value ? "is-active" : ""}
-                  key={value}
-                  type="button"
-                  aria-pressed={statsLevel === value}
-                  onClick={() => chooseStatsLevel(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="solo-stats">
             <div>
               <span>剩余雷数</span>
@@ -1538,29 +1637,6 @@ export function SoloGame({
 
           <div className="solo-progress-track">
             <i style={{ width: `${progress}%` }} />
-          </div>
-
-          <div className="solo-option-block solo-theme-block">
-            <span className="meta-label">棋盘显示</span>
-            <div className="solo-compact-tabs" role="group" aria-label="棋盘显示方案">
-              {(
-                [
-                  ["black-gold", "舒适"],
-                  ["classic", "专业"],
-                  ["high-contrast", "高对比"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  className={boardTheme === value ? "is-active" : ""}
-                  key={value}
-                  type="button"
-                  aria-pressed={boardTheme === value}
-                  onClick={() => chooseBoardTheme(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="solo-notice" aria-live="polite">

@@ -1337,7 +1337,7 @@ export function App() {
                       type="button"
                       onClick={() => enterSolo()}
                     >
-                      单人游戏 · 立即开局
+                      单人游戏 · 配置开局
                     </button>
                     <p className="entry-mode-note">
                       完成终局后写入版本化本地历史；刷新或重启浏览器后仍可复盘。
