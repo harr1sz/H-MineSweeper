@@ -40,14 +40,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Install Playwright Chromium
+        run: pnpm --filter @h-minesweeper/web exec playwright install --with-deps chromium
+
       - name: Test
         run: pnpm test
 
       - name: Build production artifacts
         run: pnpm build
-
-      - name: Install Playwright Chromium
-        run: pnpm --filter @h-minesweeper/web exec playwright install --with-deps chromium
 
       - name: Browser E2E
         run: pnpm --filter @h-minesweeper/web e2e
