@@ -80,6 +80,7 @@ const ZOOM_STEP = 4;
 const DIRTY_REDRAW_THRESHOLD = 0.15;
 const MAX_ANIMATED_CELLS = 64;
 const MAX_CANVAS_LAYER_PIXELS = 4_000_000;
+const LARGE_BOARD_SURFACE_CELL_THRESHOLD = 2_500;
 
 const PALETTES: Readonly<Record<BoardTheme, BoardPalette>> = {
   classic: {
@@ -683,61 +684,68 @@ export function CanvasBoard({
     context.font = `900 ${markMetrics.numberFontSize}px "JetBrains Mono", "SFMono-Regular", monospace`;
     context.lineJoin = "round";
 
-    const drawCell = (index: number) => {
+    const resolveVisibility = (
+      storedVisibility: number,
+      hasMine: boolean,
+    ) =>
+      showTerminalMines &&
+      game?.outcome === "LOST" &&
+      hasMine &&
+      storedVisibility === HIDDEN
+        ? REVEALED
+        : showTerminalMines &&
+            game?.outcome === "WON" &&
+            hasMine &&
+            storedVisibility === HIDDEN
+          ? FLAGGED
+          : storedVisibility;
+
+    const drawCell = (index: number, drawSurface = true) => {
       const x = (index % width) * cellSize;
       const y = Math.floor(index / width) * cellSize;
       const storedVisibility = game?.visibility[index] ?? HIDDEN;
       const hasMine = game?.board.mines[index] === 1;
+      const visibility = resolveVisibility(storedVisibility, hasMine);
       const wrongFlag =
         showTerminalMines &&
         game?.outcome === "LOST" &&
         storedVisibility === FLAGGED &&
         !hasMine;
-      const visibility =
-        showTerminalMines &&
-        game?.outcome === "LOST" &&
-        hasMine &&
-        storedVisibility === HIDDEN
-          ? REVEALED
-          : showTerminalMines &&
-              game?.outcome === "WON" &&
-              hasMine &&
-              storedVisibility === HIDDEN
-            ? FLAGGED
-            : storedVisibility;
       const isPressed = index === pressedIndex;
       const isFocused = index === focusIndex;
 
-      if (visibility === REVEALED) {
-        context.fillStyle = hasMine ? palette.mineCell : palette.revealed;
-      } else if (visibility === FLAGGED) {
-        context.fillStyle = palette.flagged;
-      } else if (isPressed) {
-        context.fillStyle = palette.pressed;
-      } else {
-        context.fillStyle = (index + Math.floor(index / width)) % 2 === 0
-          ? palette.hiddenA
-          : palette.hiddenB;
-      }
-      context.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+      if (drawSurface) {
+        if (visibility === REVEALED) {
+          context.fillStyle = hasMine ? palette.mineCell : palette.revealed;
+        } else if (visibility === FLAGGED) {
+          context.fillStyle = palette.flagged;
+        } else if (isPressed) {
+          context.fillStyle = palette.pressed;
+        } else {
+          context.fillStyle = (index + Math.floor(index / width)) % 2 === 0
+            ? palette.hiddenA
+            : palette.hiddenB;
+        }
+        context.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
 
-      context.strokeStyle =
-        visibility === REVEALED
-          ? palette.revealedLine
-          : palette.hiddenLine;
-      context.lineWidth = 1;
-      context.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
-
-      if (cellCount <= 2_500 && cellSize > MIN_CELL_SIZE) {
-        context.beginPath();
-        context.moveTo(x + 2.5, y + 2.5);
-        context.lineTo(x + cellSize - 2.5, y + 2.5);
         context.strokeStyle =
           visibility === REVEALED
-            ? palette.revealedHighlight
-            : palette.hiddenHighlight;
-        context.lineWidth = Math.max(1, cellSize * 0.045);
-        context.stroke();
+            ? palette.revealedLine
+            : palette.hiddenLine;
+        context.lineWidth = 1;
+        context.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
+
+        if (cellCount <= 2_500 && cellSize > MIN_CELL_SIZE) {
+          context.beginPath();
+          context.moveTo(x + 2.5, y + 2.5);
+          context.lineTo(x + cellSize - 2.5, y + 2.5);
+          context.strokeStyle =
+            visibility === REVEALED
+              ? palette.revealedHighlight
+              : palette.hiddenHighlight;
+          context.lineWidth = Math.max(1, cellSize * 0.045);
+          context.stroke();
+        }
       }
 
       const centerX = x + cellSize / 2;
@@ -828,16 +836,85 @@ export function CanvasBoard({
       redrawWholeBoard = shouldRedrawWholeBoard(dirty.size, cellCount);
     }
 
+    const useSimplifiedLargeBoardSurface =
+      redrawWholeBoard && cellCount > LARGE_BOARD_SURFACE_CELL_THRESHOLD;
     if (redrawWholeBoard) {
       context.fillStyle = palette.canvas;
       context.fillRect(0, 0, cssWidth, cssHeight);
-      for (let index = 0; index < cellCount; index += 1) drawCell(index);
+      if (useSimplifiedLargeBoardSurface) {
+        context.fillStyle = palette.hiddenA;
+        context.fillRect(0, 0, cssWidth, cssHeight);
+        for (let row = 0; row < height; row += 1) {
+          let runStart = 0;
+          let runColor = palette.hiddenA;
+          for (let column = 0; column <= width; column += 1) {
+            let nextColor = "";
+            if (column < width) {
+              const index = row * width + column;
+              const storedVisibility = game?.visibility[index] ?? HIDDEN;
+              const hasMine = game?.board.mines[index] === 1;
+              const visibility = resolveVisibility(storedVisibility, hasMine);
+              nextColor =
+                visibility === REVEALED
+                  ? hasMine
+                    ? palette.mineCell
+                    : palette.revealed
+                  : visibility === FLAGGED
+                    ? palette.flagged
+                    : index === pressedIndex
+                      ? palette.pressed
+                      : palette.hiddenA;
+            }
+            if (nextColor === runColor) continue;
+            if (runColor !== palette.hiddenA) {
+              context.fillStyle = runColor;
+              context.fillRect(
+                runStart * cellSize + 1,
+                row * cellSize + 1,
+                (column - runStart) * cellSize - 2,
+                cellSize - 2,
+              );
+            }
+            runStart = column;
+            runColor = nextColor;
+          }
+        }
+
+        context.beginPath();
+        for (let column = 0; column <= width; column += 1) {
+          const x = clamp(column * cellSize - 0.5, 0.5, cssWidth - 0.5);
+          context.moveTo(x, 0.5);
+          context.lineTo(x, cssHeight - 0.5);
+        }
+        for (let row = 0; row <= height; row += 1) {
+          const y = clamp(row * cellSize - 0.5, 0.5, cssHeight - 0.5);
+          context.moveTo(0.5, y);
+          context.lineTo(cssWidth - 0.5, y);
+        }
+        context.lineWidth = 1;
+        context.strokeStyle = palette.hiddenLine;
+        context.stroke();
+
+        for (let index = 0; index < cellCount; index += 1) {
+          const storedVisibility = game?.visibility[index] ?? HIDDEN;
+          const hasMine = game?.board.mines[index] === 1;
+          const visibility = resolveVisibility(storedVisibility, hasMine);
+          if (visibility !== HIDDEN || index === focusIndex) {
+            drawCell(index, false);
+          }
+        }
+      } else {
+        for (let index = 0; index < cellCount; index += 1) drawCell(index);
+      }
     } else {
       for (const index of dirty) drawCell(index);
     }
     const baseDrawMs = performance.now() - drawStartedAt;
     if (redrawWholeBoard) {
       recordMetric("boardFullDrawMs", baseDrawMs);
+      if (useSimplifiedLargeBoardSurface) {
+        recordMetric("boardFullDrawSimplifiedMs", baseDrawMs);
+      }
     } else if (dirty.size > 0) {
       recordMetric("boardDirtyDrawMs", baseDrawMs);
     }

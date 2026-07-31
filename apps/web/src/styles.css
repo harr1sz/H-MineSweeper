@@ -1159,7 +1159,7 @@ input:focus {
   max-width: 100%;
   min-height: calc(100vh - 238px);
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   overscroll-behavior: contain;
   overflow: auto;
   padding: 22px;
@@ -1168,6 +1168,7 @@ input:focus {
 .board-canvas-stack {
   position: relative;
   flex: 0 0 auto;
+  margin-inline: auto;
 }
 
 .board-canvas-stack .mine-board,
