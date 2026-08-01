@@ -60,13 +60,9 @@ test("ISSUE-003 terminal result can review the board and reopen summary", async 
   await clickBoardCell(page, mineIndex);
 
   await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
-  await page.getByRole("button", { name: "查看棋盘" }).click();
   await expect(page.locator(".result-overlay")).toHaveCount(0);
   await expect(
     page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "查看结算" })).toBeVisible();
-
-  await page.getByRole("button", { name: "查看结算" }).click();
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "分析本局" })).toBeVisible();
 });

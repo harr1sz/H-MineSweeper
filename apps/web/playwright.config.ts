@@ -2,7 +2,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:5173";
+const requestedPort = Number.parseInt(process.env.HMS_E2E_PORT ?? "5173", 10);
+const port = Number.isSafeInteger(requestedPort) && requestedPort >= 1024 && requestedPort <= 65_535
+  ? requestedPort
+  : 5173;
+const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -19,14 +23,15 @@ export default defineConfig({
   use: {
     baseURL,
     browserName: "chromium",
+    locale: "zh-CN",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
   webServer: {
     command:
-      "VITE_TELEMETRY_ENABLED=false VITE_DUEL_EXPERIMENT=true node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173",
+      `VITE_TELEMETRY_ENABLED=false VITE_DUEL_EXPERIMENT=true node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.HMS_E2E_REUSE_SERVER === "true",
     timeout: 120_000,
   },
 });

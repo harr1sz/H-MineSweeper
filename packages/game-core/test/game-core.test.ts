@@ -17,6 +17,7 @@ import {
   calculateGameMetrics,
   calculateGameStatistics,
   calculateIOE,
+  analyzeVisibleBoard,
   certifyNoGuess,
   chordCell,
   countBoardActions,
@@ -520,5 +521,191 @@ describe("no-guess solver", () => {
     expect(result.solved).toBe(false);
     expect(result.unresolved.length).toBeGreaterThan(0);
     expect(certifyNoGuess(board)).toBeNull();
+  });
+});
+
+describe("visible-board replay solver", () => {
+  it("matches an exhaustive oracle across every consistent 3x2 visible position", () => {
+    const width = 3;
+    const height = 2;
+    const cellCount = width * height;
+    const bitCount = (mask: number) => {
+      let value = mask;
+      let count = 0;
+      while (value > 0) {
+        count += value & 1;
+        value >>>= 1;
+      }
+      return count;
+    };
+
+    for (let truth = 1; truth < 1 << cellCount; truth += 1) {
+      const totalMines = bitCount(truth);
+      if (totalMines > 2) continue;
+      const safeMask = ((1 << cellCount) - 1) ^ truth;
+      for (let revealed = 1; revealed < 1 << cellCount; revealed += 1) {
+        if ((revealed & ~safeMask) !== 0) continue;
+        const clues = Array.from({ length: cellCount }, (_, index) => {
+          if ((revealed & (1 << index)) === 0) return -1;
+          return getNeighborIndices(width, height, index).filter(
+            (neighbor) => (truth & (1 << neighbor)) !== 0,
+          ).length;
+        });
+        const candidates: number[] = [];
+        for (let candidate = 0; candidate < 1 << cellCount; candidate += 1) {
+          if (bitCount(candidate) !== totalMines || (candidate & revealed) !== 0) continue;
+          const consistent = clues.every((clue, index) =>
+            clue < 0 || getNeighborIndices(width, height, index).filter(
+              (neighbor) => (candidate & (1 << neighbor)) !== 0,
+            ).length === clue,
+          );
+          if (consistent) candidates.push(candidate);
+        }
+        expect(candidates.length).toBeGreaterThan(0);
+
+        const analysis = analyzeVisibleBoard({
+          width,
+          height,
+          totalMines,
+          clues,
+          playerClaims: [0, 5],
+        });
+        expect(analysis.status).toBe("COMPLETE");
+        const provedSafe = new Set(
+          analysis.proofs.filter(({ kind }) => kind === "SAFE").flatMap(({ targets }) => targets),
+        );
+        const provedMines = new Set(
+          analysis.proofs.filter(({ kind }) => kind === "MINE").flatMap(({ targets }) => targets),
+        );
+        for (let index = 0; index < cellCount; index += 1) {
+          if ((revealed & (1 << index)) !== 0) continue;
+          const alwaysMine = candidates.every((candidate) => (candidate & (1 << index)) !== 0);
+          const alwaysSafe = candidates.every((candidate) => (candidate & (1 << index)) === 0);
+          expect(provedMines.has(index)).toBe(alwaysMine);
+          expect(provedSafe.has(index)).toBe(alwaysSafe);
+        }
+      }
+    }
+  });
+
+  it("matches a bounded exhaustive oracle on deterministic 4x4 and 5x5 samples", () => {
+    for (const size of [4, 5]) {
+      for (let sample = 1; sample <= 8; sample += 1) {
+        const cellCount = size * size;
+        let random = sample * 0x9e3779b1;
+        const nextRandom = () => {
+          random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
+          return random;
+        };
+        const mineSet = new Set<number>();
+        while (mineSet.size < 3) mineSet.add(nextRandom() % cellCount);
+        const safeIndexes = Array.from({ length: cellCount }, (_, index) => index)
+          .filter((index) => !mineSet.has(index));
+        const revealed = new Set<number>();
+        for (const index of safeIndexes) {
+          if (cellCount - revealed.size <= 12 || nextRandom() % 3 !== 0) revealed.add(index);
+        }
+        if (revealed.size === 0) revealed.add(safeIndexes[0]!);
+        while (cellCount - revealed.size > 12) {
+          const next = safeIndexes.find((index) => !revealed.has(index));
+          if (next === undefined) break;
+          revealed.add(next);
+        }
+        const hidden = Array.from({ length: cellCount }, (_, index) => index)
+          .filter((index) => !revealed.has(index));
+        const clues = Array.from({ length: cellCount }, (_, index) => {
+          if (!revealed.has(index)) return -1;
+          return getNeighborIndices(size, size, index).filter((neighbor) => mineSet.has(neighbor)).length;
+        });
+        const candidates: Set<number>[] = [];
+        for (let mask = 0; mask < 2 ** hidden.length; mask += 1) {
+          const candidate = new Set(hidden.filter((_, bit) => ((mask >> bit) & 1) === 1));
+          if (candidate.size !== mineSet.size) continue;
+          const consistent = clues.every((clue, index) =>
+            clue < 0 || getNeighborIndices(size, size, index).filter((neighbor) => candidate.has(neighbor)).length === clue,
+          );
+          if (consistent) candidates.push(candidate);
+        }
+        expect(candidates.length).toBeGreaterThan(0);
+        const analysis = analyzeVisibleBoard({
+          width: size,
+          height: size,
+          totalMines: mineSet.size,
+          clues,
+          playerClaims: hidden.filter((_, index) => index % 4 === 0),
+        }, 1_000_000);
+        expect(analysis.status).toBe("COMPLETE");
+        const provedSafe = new Set(analysis.proofs.filter(({ kind }) => kind === "SAFE").flatMap(({ targets }) => targets));
+        const provedMines = new Set(analysis.proofs.filter(({ kind }) => kind === "MINE").flatMap(({ targets }) => targets));
+        for (const index of hidden) {
+          expect(provedSafe.has(index)).toBe(candidates.every((candidate) => !candidate.has(index)));
+          expect(provedMines.has(index)).toBe(candidates.every((candidate) => candidate.has(index)));
+        }
+      }
+    }
+  });
+
+  it("treats a player flag as a claim rather than mine truth", () => {
+    const base = { width: 3, height: 1, totalMines: 1, clues: [-1, 1, -1] };
+    const withoutFlag = analyzeVisibleBoard({ ...base, playerClaims: [] });
+    const withFlag = analyzeVisibleBoard({ ...base, playerClaims: [0] });
+
+    expect(withoutFlag.status).toBe("COMPLETE");
+    expect(withFlag.status).toBe("COMPLETE");
+    expect(withFlag.proofs).toEqual([]);
+    expect(withFlag.proofs).toEqual(withoutFlag.proofs);
+  });
+
+  it("solves a 2-3-2 frontier without requiring the player to flag known mines", () => {
+    const analysis = analyzeVisibleBoard({
+      width: 5,
+      height: 2,
+      totalMines: 3,
+      clues: [-1, -1, -1, -1, -1, 1, 2, 3, 2, 1],
+      playerClaims: [],
+    });
+    const safe = new Set(analysis.proofs.filter(({ kind }) => kind === "SAFE").flatMap(({ targets }) => targets));
+    const mines = new Set(analysis.proofs.filter(({ kind }) => kind === "MINE").flatMap(({ targets }) => targets));
+
+    expect(analysis.status).toBe("COMPLETE");
+    expect([...safe]).toEqual(expect.arrayContaining([0, 4]));
+    expect([...mines]).toEqual(expect.arrayContaining([1, 2, 3]));
+  });
+
+  it("cannot change conclusions when hidden truth metadata changes", () => {
+    const visible = { width: 3, height: 1, totalMines: 1, clues: [-1, 1, -1], playerClaims: [] };
+    const leftMine = analyzeVisibleBoard({ ...visible, hiddenTruth: [0] } as typeof visible);
+    const rightMine = analyzeVisibleBoard({ ...visible, hiddenTruth: [2] } as typeof visible);
+    expect(leftMine).toEqual(rightMine);
+  });
+
+  it("returns proof-bound forced cells and deterministic partial status", () => {
+    const forced = analyzeVisibleBoard({
+      width: 2, height: 1, totalMines: 1, clues: [1, -1], playerClaims: [],
+    });
+    expect(forced.proofs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rule: "SINGLE_MINE", targets: [1], kind: "MINE" }),
+    ]));
+
+    const partial = analyzeVisibleBoard({
+      width: 3, height: 1, totalMines: 1, clues: [-1, 1, -1], playerClaims: [],
+    }, 1);
+    expect(partial.status).toBe("PARTIAL");
+    expect(partial.searchedNodes).toBe(1);
+  });
+
+  it("uses the global remaining mine count after frontier constraints", () => {
+    const analysis = analyzeVisibleBoard({
+      width: 4,
+      height: 1,
+      totalMines: 1,
+      clues: [1, -1, -1, -1],
+      playerClaims: [3],
+    });
+    expect(analysis.status).toBe("COMPLETE");
+    expect(analysis.proofs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rule: "SINGLE_MINE", targets: [1] }),
+      expect.objectContaining({ rule: "GLOBAL_SAFE", targets: [2, 3] }),
+    ]));
   });
 });

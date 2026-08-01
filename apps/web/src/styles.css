@@ -218,6 +218,24 @@ canvas:focus-visible {
     transform 80ms ease;
 }
 
+.language-toggle {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.locale-warning {
+  margin: 0 auto;
+  width: min(1180px, calc(100% - 32px));
+  padding: 8px 12px;
+  border: 1px solid rgba(244, 190, 67, 0.5);
+  background: rgba(49, 35, 7, 0.92);
+  color: #ffe1a0;
+  font-size: 0.78rem;
+}
+
 .text-toggle:hover:not(:disabled) {
   border-color: var(--line);
   color: var(--ink);

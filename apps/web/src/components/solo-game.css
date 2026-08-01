@@ -575,6 +575,19 @@
   color: var(--ink);
 }
 
+.solo-terminal-panel {
+  margin: -10px -10px 18px;
+  border: 1px solid rgb(228 184 91 / 42%);
+  background: linear-gradient(180deg, rgb(228 184 91 / 9%), transparent), #101116;
+  padding: 18px;
+}
+
+.solo-terminal-panel h2 { margin: 8px 0; font-size: 28px; }
+.solo-terminal-panel p { margin: 0; color: var(--muted); }
+.solo-terminal-panel .result-actions { display: grid; margin-top: 16px; }
+.solo-terminal-panel .primary-button { text-align: center; text-decoration: none; }
+.solo-terminal-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 14px; color: var(--muted); font: 650 8px var(--mono); }
+
 .reduced-motion .flow-combo,
 .effects-essential .flow-combo {
   animation: none;

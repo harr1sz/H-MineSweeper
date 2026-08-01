@@ -65,26 +65,42 @@ export type NoGuessWorkerResponse =
 export function getSoloConfigError(
   config: SoloBoardConfig,
 ): string | undefined {
+  const error = getSoloConfigErrorCode(config);
+  if (!error) return undefined;
+  if (error.code === "WIDTH_RANGE") return "宽度必须是 5–100 的整数。";
+  if (error.code === "HEIGHT_RANGE") return "高度必须是 5–100 的整数。";
+  if (error.code === "CELL_LIMIT") return "棋盘总格数不能超过 10,000。";
+  if (error.code === "MINE_RANGE") return `雷数必须是 1–${error.maxMines} 的整数。`;
+  return "无猜自定义棋盘的宽高不能超过 50。";
+}
+
+export type SoloConfigError =
+  | { readonly code: "WIDTH_RANGE" | "HEIGHT_RANGE" | "CELL_LIMIT" | "NO_GUESS_SIZE_LIMIT" }
+  | { readonly code: "MINE_RANGE"; readonly maxMines: number };
+
+export function getSoloConfigErrorCode(
+  config: SoloBoardConfig,
+): SoloConfigError | undefined {
   const { width, height, mines, mode } = config;
   if (!Number.isSafeInteger(width) || width < 5 || width > 100) {
-    return "宽度必须是 5–100 的整数。";
+    return { code: "WIDTH_RANGE" };
   }
   if (!Number.isSafeInteger(height) || height < 5 || height > 100) {
-    return "高度必须是 5–100 的整数。";
+    return { code: "HEIGHT_RANGE" };
   }
   const cells = width * height;
   if (cells > 10_000) {
-    return "棋盘总格数不能超过 10,000。";
+    return { code: "CELL_LIMIT" };
   }
   if (
     !Number.isSafeInteger(mines) ||
     mines < 1 ||
     mines > Math.floor(cells * 0.4)
   ) {
-    return `雷数必须是 1–${Math.floor(cells * 0.4)} 的整数。`;
+    return { code: "MINE_RANGE", maxMines: Math.floor(cells * 0.4) };
   }
   if (mode === "no_guess" && (width > 50 || height > 50)) {
-    return "无猜自定义棋盘的宽高不能超过 50。";
+    return { code: "NO_GUESS_SIZE_LIMIT" };
   }
   return undefined;
 }

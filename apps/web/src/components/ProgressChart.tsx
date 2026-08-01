@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useLocale } from "../i18n";
 
 export interface ProgressPoint {
   elapsedMs: number;
@@ -12,6 +13,7 @@ interface ProgressChartProps {
 }
 
 export function ProgressChart({ history, playerIds, labels }: ProgressChartProps) {
+  const { t } = useLocale();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -68,7 +70,7 @@ export function ProgressChart({ history, playerIds, labels }: ProgressChartProps
       <canvas
         ref={canvasRef}
         role="img"
-        aria-label="本局双方安全格完成进度曲线"
+        aria-label={t("duel.progressChartAria")}
       />
     </div>
   );

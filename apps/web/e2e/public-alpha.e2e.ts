@@ -38,6 +38,7 @@ async function clickBoardCell(
   const box = await board.boundingBox();
   if (!box) throw new Error("棋盘布局不可测量");
   await board.click({
+    force: true,
     position: {
       x: ((index % width) + 0.5) * (box.width / width),
       y: (Math.floor(index / width) + 0.5) * (box.height / height),
@@ -48,10 +49,10 @@ async function clickBoardCell(
 async function finishSmallCustomRun(page: Page): Promise<void> {
   await clickBoardCell(page, 12, 5, 5);
   for (let index = 0; index < 25; index += 1) {
-    if (await page.locator(".result-overlay").count()) break;
+    if (await page.locator(".solo-terminal-panel").count()) break;
     await clickBoardCell(page, index, 5, 5);
   }
-  await expect(page.locator(".result-overlay")).toBeVisible();
+  await expect(page.locator(".solo-terminal-panel")).toBeVisible();
 }
 
 async function fulfillJson(
@@ -120,6 +121,10 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
     name: "选择是否分享假名化使用数据",
   });
   await expect(dialogHeading).toBeVisible();
+  const privacyDialog = page.getByRole("dialog", { name: "选择是否分享假名化使用数据" });
+  await privacyDialog.getByRole("button", { name: "切换到英文" }).click();
+  await expect(page.getByRole("heading", { name: "Choose whether to share pseudonymous usage data" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Choose whether to share pseudonymous usage data" }).getByRole("button", { name: "Switch to Chinese" }).click();
   await expect(
     page.getByRole("button", { name: "稍后决定，继续游戏" }),
   ).toBeVisible();
@@ -128,6 +133,11 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
   await expect(
     page.getByRole("button", { name: "单人游戏 · 配置开局" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "切换到英文" }).click();
+  await page.locator(".home-mode-option").nth(2).click();
+  await expect(page.getByRole("button", { name: "1v1 temporarily paused" })).toBeVisible();
+  await expect(page.getByText("Solo remains unaffected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Switch to Chinese" }).click();
 
   await page.getByRole("button", { name: "数据与隐私" }).click();
   await page.getByRole("button", { name: "稍后决定，继续游戏" }).click();

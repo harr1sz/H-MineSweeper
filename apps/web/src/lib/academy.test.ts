@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ACADEMY_EXERCISES,
+  ACADEMY_NEIGHBORHOOD_EXERCISES,
   analyzeAcademyExercise,
   createEmptyAcademyProgress,
   evaluateAcademyAnswers,
@@ -18,7 +19,7 @@ import {
 
 describe("academy content", () => {
   it("keeps every exercise proof-driven and internally valid", () => {
-    for (const exercise of ACADEMY_EXERCISES) {
+    for (const exercise of [...ACADEMY_EXERCISES, ...ACADEMY_NEIGHBORHOOD_EXERCISES]) {
       expect(exercise.hints).toHaveLength(6);
       expect(exercise.cells).toHaveLength(exercise.width * exercise.height);
       const safe = new Set(exercise.safeTargets);
@@ -60,14 +61,40 @@ describe("academy content", () => {
     const exercise = ACADEMY_EXERCISES.find(
       (entry) => entry.id === "c3-pattern-121",
     );
-    expect(exercise?.mineTargets).toEqual([0, 2]);
-    expect(exercise?.safeTargets).toEqual([1]);
+    const labelIndex = (label: string) => exercise?.cells.findIndex(
+      (cell) => cell.kind === "unknown" && cell.label === label,
+    );
+    expect(exercise?.mineTargets).toEqual([labelIndex("A"), labelIndex("C")]);
+    expect(exercise?.safeTargets).toEqual([labelIndex("B")]);
     expect(exercise?.premise).toContain("没有额外未知邻格");
   });
 
   it("does not publish a bare 2-2 shortcut", () => {
     const corpus = JSON.stringify(ACADEMY_EXERCISES);
     expect(corpus).not.toContain('"2-2"');
+  });
+
+  it("uses a real chained 1-1-2 exercise instead of relabeling the subset demo", () => {
+    const exercise = ACADEMY_EXERCISES.find(({ id }) => id === "practice-chained-fronts")!;
+    const analysis = analyzeAcademyExercise(exercise);
+    expect(exercise.cells.filter(({ kind }) => kind === "number").map((cell) => cell.kind === "number" ? cell.value : -1)).toEqual([1, 1, 2]);
+    expect(analysis.safeTargets).toHaveLength(2);
+    expect(analysis.mineTargets).toHaveLength(2);
+  });
+
+  it("keeps beginner-facing Chinese copy free of unexplained internal jargon", () => {
+    for (const exercise of [...ACADEMY_EXERCISES, ...ACADEMY_NEIGHBORHOOD_EXERCISES]) {
+      const copy = [exercise.title, exercise.objective, exercise.premise, exercise.proof, ...exercise.hints].join(" ");
+      expect(copy).not.toMatch(/和弦|多个前沿|接触哪些未开格|\bproof\b/iu);
+    }
+  });
+
+  it("uses contextual teaching boards instead of one- or two-cell demos", () => {
+    for (const exercise of [...ACADEMY_EXERCISES, ...ACADEMY_NEIGHBORHOOD_EXERCISES]) {
+      const minimumCells = exercise.chapterId === 0 ? 16 : exercise.chapterId === 1 ? 25 : 30;
+      expect(exercise.width * exercise.height).toBeGreaterThanOrEqual(minimumCells);
+      expect(exercise.proof).not.toMatch(/\b[A-D]\b|PROOF|STATE|\{[A-D]/u);
+    }
   });
 
   it("preserves every authored conclusion across rotations and mirrors", () => {
@@ -96,8 +123,12 @@ describe("academy progress", () => {
     const exercise = ACADEMY_EXERCISES.find(
       (entry) => entry.id === "c2-subset-safe",
     )!;
-    expect(evaluateAcademyAnswers(exercise, { 2: "safe" }).correct).toBe(true);
-    expect(evaluateAcademyAnswers(exercise, { 0: "mine", 2: "safe" }).correct)
+    const safeTarget = exercise.safeTargets[0]!;
+    const otherUnknown = exercise.cells.findIndex(
+      (cell, index) => cell.kind === "unknown" && index !== safeTarget,
+    );
+    expect(evaluateAcademyAnswers(exercise, { [safeTarget]: "safe" }).correct).toBe(true);
+    expect(evaluateAcademyAnswers(exercise, { [otherUnknown]: "mine", [safeTarget]: "safe" }).correct)
       .toBe(false);
     expect(evaluateAcademyAnswers(exercise, {}).correct).toBe(false);
   });
