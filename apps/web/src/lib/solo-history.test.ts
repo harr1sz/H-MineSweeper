@@ -14,6 +14,9 @@ import {
   createSoloHistoryExport,
   createSoloHistoryRecoveryExport,
   createSoloLegacyPersonalBestRecoveryExport,
+  hashSoloReplay,
+  isSoloRunRecordV2,
+  parseSoloHistoryImportDocument,
   getOrCreateTrainingSessionId,
   isSoloLegacyPersonalBestMetadataV1,
   isSoloRunRecordV1,
@@ -22,8 +25,18 @@ import {
   sameSoloConfigurationAndRules,
   touchTrainingSession,
   type SoloRunRecordV1,
+  type SoloRunRecordV2,
+  type SoloReplayV1,
 } from "./solo-history";
 import type { SoloBoardConfig } from "./solo";
+import {
+  createBoard,
+  createGameState,
+  hashBoard,
+  hashGameState,
+  revealCell,
+  toggleFlag,
+} from "@h-minesweeper/game-core";
 
 const CONFIG: SoloBoardConfig = {
   width: 9,
@@ -94,6 +107,53 @@ function manyRecords(count: number, offset = 0): SoloRunRecordV1[] {
   );
 }
 
+function replayRecord(recordId = "replay-run"): {
+  readonly record: SoloRunRecordV2;
+  readonly replay: SoloReplayV1;
+} {
+  const spec = { width: 9, height: 9, mines: 10, seed: `seed-${recordId}`, startIndex: 0, safeRadius: 1 };
+  const state = createGameState(createBoard(spec));
+  toggleFlag(state, 2);
+  const preStateHash = hashGameState(state);
+  const delta = revealCell(state, 0);
+  const replay: SoloReplayV1 = {
+    schemaVersion: 1,
+    recordId,
+    initialFlags: [2],
+    actions: [{
+      seq: 1,
+      elapsedMs: 0,
+      actionType: "REVEAL",
+      cellIndex: 0,
+      physicalClicks: 1,
+      preStateHash,
+      accepted: delta.accepted,
+      postStateHash: delta.stateHash,
+    }],
+  };
+  const legacy = record(recordId, 100, 2_000);
+  return {
+    replay,
+    record: {
+      ...legacy,
+      schemaVersion: 2,
+      board: {
+        spec,
+        boardHash: hashBoard(state.board),
+        generatorRulesVersion: 1,
+        trustStatus: "LOCAL_UNVERIFIED",
+      },
+      replay: {
+        status: "TRUNCATED",
+        reason: "BYTE_LIMIT",
+        schemaVersion: 1,
+        actionCount: replay.actions.length,
+        actionLogHash: hashSoloReplay(replay),
+      },
+    },
+  };
+}
+
 function legacyPersonalBestStorage(entries: Readonly<Record<string, string>>) {
   const values = new Map(Object.entries(entries));
   return {
@@ -109,6 +169,38 @@ function legacyPersonalBestStorage(entries: Readonly<Record<string, string>>) {
 }
 
 describe("solo history data contract", () => {
+  it("stores a V2 summary and replay together and rejects mismatched logs", async () => {
+    const pair = replayRecord();
+    expect(isSoloRunRecordV2(pair.record)).toBe(true);
+    const store = createMemorySoloHistoryStore();
+    await store.put(pair.record, pair.replay);
+    expect(await store.readReplay(pair.record.recordId)).toEqual(pair.replay);
+
+    const tampered = { ...pair.replay, actions: [{ ...pair.replay.actions[0]!, cellIndex: 1 }] };
+    await expect(
+      createMemorySoloHistoryStore().put(pair.record, tampered),
+    ).rejects.toBeInstanceOf(SoloHistoryValidationError);
+  });
+
+  it("imports V1 and V2 documents without fabricating legacy replay", async () => {
+    const pair = replayRecord("import-v2");
+    const document = createSoloHistoryExport([pair.record], [pair.replay], new Date(0));
+    const parsed = parseSoloHistoryImportDocument(JSON.stringify(document));
+    const store = createMemorySoloHistoryStore();
+    await store.importDocument(parsed);
+    expect(await store.readReplay(pair.record.recordId)).toEqual(pair.replay);
+
+    const legacyDocument = {
+      format: "h-minesweeper-solo-history",
+      schemaVersion: 1,
+      exportedAt: new Date(0).toISOString(),
+      recordCount: 1,
+      records: [record("legacy-import", 100, 2_000)],
+    };
+    const normalized = parseSoloHistoryImportDocument(JSON.stringify(legacyDocument));
+    expect(normalized.replays).toEqual([]);
+    expect(normalized.records[0]?.schemaVersion).toBe(1);
+  });
   it("validates the full versioned record contract", () => {
     const valid = record("valid", 100, 2_000);
     expect(isSoloRunRecordV1(valid)).toBe(true);

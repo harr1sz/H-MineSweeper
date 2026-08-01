@@ -11,6 +11,7 @@ import {
   createGameState,
   getProgress,
   hashBoard,
+  hashGameState,
   isProvablySafeCell,
   revealCell,
   toggleFlag,
@@ -33,7 +34,7 @@ import {
   createPendingSoloGame,
   createSoloBoardSpec,
   createSoloSeed,
-  getSoloConfigError,
+  getSoloConfigErrorCode,
   type NoGuessWorkerRequest,
   type NoGuessWorkerResponse,
   type SoloBoardConfig,
@@ -43,13 +44,20 @@ import {
 import {
   SOLO_GAME_RULES_VERSION,
   SOLO_METRIC_RULES_VERSION,
-  SOLO_RUN_SCHEMA_VERSION,
+  SOLO_REPLAY_MAX_ACTIONS,
+  SOLO_REPLAY_MAX_BYTES,
+  SOLO_REPLAY_SCHEMA_VERSION,
+  SOLO_RUN_SCHEMA_VERSION_V2,
   createIndexedDbSoloHistoryStore,
+  hashSoloReplay,
   recordTrainingSessionTerminal,
   touchTrainingSession,
   type SoloHistoryCapacity,
   type SoloHistoryStore,
-  type SoloRunRecordV1,
+  type SoloReplayActionV1,
+  type SoloReplayV1,
+  type SoloRunRecord,
+  type SoloRunRecordV2,
 } from "../lib/solo-history";
 import {
   SOLO_PREFERENCES_SCHEMA_VERSION,
@@ -69,11 +77,13 @@ import {
 } from "./CanvasBoard";
 import { SoloHistory } from "./SoloHistory";
 import { useTelemetry } from "./TelemetryPrivacy";
+import { useLocale } from "../i18n";
 import "./solo-game.css";
 
 interface SoloGameProps {
   readonly effectsProfile: BoardEffectsProfile;
   readonly initialGenerationMode?: SoloGenerationMode;
+  readonly initialBoardConfig?: SoloBoardConfig;
   readonly reducedMotion: boolean;
   readonly onExit: () => void;
 }
@@ -146,21 +156,15 @@ function formatMetric(value: number | null, digits = 2): string {
     : value.toFixed(digits);
 }
 
-function comboCopy(combo: number): string {
-  if (combo >= 12) return "逻辑风暴";
-  if (combo >= 8) return "清场连击";
-  if (combo >= 5) return "节奏正热";
-  return "判断上线";
-}
-
 export interface PendingHistoryWriteSnapshot {
-  readonly record: SoloRunRecordV1;
+  readonly record: SoloRunRecord;
   readonly status: "queued" | "saving" | "failed";
   readonly error: string | null;
 }
 
 interface PendingHistoryWriteEntry {
-  readonly record: SoloRunRecordV1;
+  readonly record: SoloRunRecord;
+  readonly replay?: SoloReplayV1;
   status: PendingHistoryWriteSnapshot["status"];
   error: string | null;
   attempt: Promise<PendingHistoryWriteResult> | undefined;
@@ -181,15 +185,9 @@ const pendingHistoryListeners = new Set<() => void>();
 let pendingHistoryVersion = 0;
 
 function immutableHistoryRecord(
-  record: SoloRunRecordV1,
-): SoloRunRecordV1 {
-  return Object.freeze({
-    ...record,
-    config: Object.freeze({ ...record.config }),
-    board: Object.freeze({ ...record.board }),
-    rules: Object.freeze({ ...record.rules }),
-    metrics: Object.freeze({ ...record.metrics }),
-  });
+  record: SoloRunRecord,
+): SoloRunRecord {
+  return Object.freeze(structuredClone(record));
 }
 
 function notifyPendingHistoryChange(): void {
@@ -203,13 +201,15 @@ function subscribePendingHistory(listener: () => void): () => void {
 }
 
 export function enqueuePendingHistoryRecord(
-  record: SoloRunRecordV1,
-): SoloRunRecordV1 {
+  record: SoloRunRecord,
+  replay?: SoloReplayV1,
+): SoloRunRecord {
   const existing = pendingHistoryWrites.get(record.recordId);
   if (existing) return existing.record;
   const immutable = immutableHistoryRecord(record);
   pendingHistoryWrites.set(record.recordId, {
     record: immutable,
+    ...(replay ? { replay: structuredClone(replay) } : {}),
     status: "queued",
     error: null,
     attempt: undefined,
@@ -235,19 +235,43 @@ export function attemptPendingHistoryWrite(
   entry.error = null;
   const attempt = (async (): Promise<PendingHistoryWriteResult> => {
     try {
-      const capacity = await store.put(entry.record);
+      const capacity = entry.replay
+        ? await store.put(entry.record, entry.replay)
+        : await store.put(entry.record);
       if (pendingHistoryWrites.get(recordId) === entry) {
         pendingHistoryWrites.delete(recordId);
         notifyPendingHistoryChange();
       }
       return { ok: true, capacity };
     } catch (cause: unknown) {
+      if (entry.record.schemaVersion === SOLO_RUN_SCHEMA_VERSION_V2 && entry.replay) {
+        const summaryOnly: SoloRunRecordV2 = {
+          ...entry.record,
+          replay: {
+            status: "UNAVAILABLE",
+            reason: "STORAGE_FAILURE",
+            schemaVersion: SOLO_REPLAY_SCHEMA_VERSION,
+            actionCount: 0,
+            actionLogHash: "",
+          },
+        };
+        try {
+          const capacity = await store.put(summaryOnly);
+          if (pendingHistoryWrites.get(recordId) === entry) {
+            pendingHistoryWrites.delete(recordId);
+            notifyPendingHistoryChange();
+          }
+          return { ok: true, capacity };
+        } catch {
+          // Preserve the full pending entry so a later retry can still save it.
+        }
+      }
       if (pendingHistoryWrites.get(recordId) === entry) {
         entry.status = "failed";
         entry.error =
           cause instanceof Error
             ? cause.message
-            : "本局成绩未能写入本地历史。";
+            : "SOLO_HISTORY_WRITE_FAILED";
         entry.attempt = undefined;
         notifyPendingHistoryChange();
       }
@@ -277,13 +301,11 @@ const DEFAULT_CONFIG: SoloBoardConfig = {
   mode: "classic",
 };
 
-const PRESET_LABELS: Readonly<
-  Record<Exclude<SoloPreset, "custom">, string>
-> = {
-  beginner: "初级",
-  intermediate: "中级",
-  expert: "高级",
-};
+const PRESET_KEYS: readonly Exclude<SoloPreset, "custom">[] = [
+  "beginner",
+  "intermediate",
+  "expert",
+];
 
 function formatSoloTime(elapsedMs: number): string {
   const centiseconds = Math.floor(Math.max(0, elapsedMs) / 10);
@@ -322,9 +344,20 @@ function classifyHistoryFailure(error: unknown): string {
 export function SoloGame({
   effectsProfile,
   initialGenerationMode,
+  initialBoardConfig,
   reducedMotion,
   onExit,
 }: SoloGameProps) {
+  const { locale, t } = useLocale();
+  const configErrorMessage = useCallback((nextConfig: SoloBoardConfig) => {
+    const error = getSoloConfigErrorCode(nextConfig);
+    if (!error) return "";
+    if (error.code === "WIDTH_RANGE") return t("solo.config.width");
+    if (error.code === "HEIGHT_RANGE") return t("solo.config.height");
+    if (error.code === "CELL_LIMIT") return t("solo.config.cells");
+    if (error.code === "MINE_RANGE") return t("solo.config.mines", { max: error.maxMines });
+    return t("solo.config.noGuessSize");
+  }, [t]);
   const { flush: flushTelemetry, track } = useTelemetry();
   const preferenceLoadRef = useRef(loadSoloPreferences());
   const restoredPreferences = preferenceLoadRef.current.preferences;
@@ -332,9 +365,12 @@ export function SoloGame({
     restoredPreferences,
     initialGenerationMode,
   );
-  const launchMode = launchPreferences.config.mode;
-  const initialConfig = launchPreferences.config;
-  const initialPreset = launchPreferences.preset;
+  const acceptedOverride = initialBoardConfig && !getSoloConfigErrorCode(initialBoardConfig)
+    ? initialBoardConfig
+    : undefined;
+  const initialConfig = acceptedOverride ?? launchPreferences.config;
+  const launchMode = initialConfig.mode;
+  const initialPreset: SoloPreset = acceptedOverride ? "custom" : launchPreferences.preset;
   const pendingSeedRef = useRef(createSoloSeed());
   const initialGame = useMemo(
     () => createPendingSoloGame(initialConfig, pendingSeedRef.current),
@@ -349,6 +385,11 @@ export function SoloGame({
   const lastComboAtRef = useRef<number | null>(null);
   const comboTimeoutRef = useRef<number | null>(null);
   const actionTraceRef = useRef<CountedBoardAction[]>([]);
+  const replayActionTraceRef = useRef<SoloReplayActionV1[]>([]);
+  const lastReplayStateHashRef = useRef(hashGameState(initialGame));
+  const replayTruncationReasonRef = useRef<"ACTION_LIMIT" | "BYTE_LIMIT" | null>(null);
+  const initialFlagsRef = useRef<readonly number[]>([]);
+  const boardSpecRef = useRef<BoardSpec | null>(null);
   const historyStoreRef = useRef(createIndexedDbSoloHistoryStore());
   const runIdentityRef = useRef<SoloRunIdentity | null>(null);
   const runCompletedAtRef = useRef<number | null>(null);
@@ -391,19 +432,34 @@ export function SoloGame({
   const [notice, setNotice] = useState(
     preferenceLoadRef.current.error ??
       (launchMode === "no_guess"
-      ? "首击后后台生成可逻辑解出的无猜棋盘，最多尝试 50 次或 5 秒。"
-      : "任意位置首击，周围 3×3 保证安全。"),
+      ? t("solo.noGuessDescription")
+      : t("solo.classicDescription")),
   );
   const [seed, setSeed] = useState("");
   const [boardHash, setBoardHash] = useState("");
   const [generationSummary, setGenerationSummary] = useState("");
-  const [reviewingTerminalBoard, setReviewingTerminalBoard] = useState(false);
+  const [terminalDetonatedIndex, setTerminalDetonatedIndex] = useState<number>();
   const [draftWidth, setDraftWidth] = useState(String(initialConfig.width));
   const [draftHeight, setDraftHeight] = useState(String(initialConfig.height));
   const [draftMines, setDraftMines] = useState(String(initialConfig.mines));
   const [pendingWriteVersion, setPendingWriteVersion] = useState(
     pendingHistoryVersion,
   );
+  useEffect(() => {
+    setNotice(
+      status === "GENERATING"
+        ? t("solo.generatingNotice")
+        : status === "WON"
+          ? t("solo.wonNotice")
+          : status === "LOST"
+            ? t("solo.lostNotice")
+            : status === "READY"
+              ? t(config.mode === "no_guess" ? "solo.noGuessDescription" : "solo.classicDescription")
+              : t("solo.mantra"),
+    );
+    // Preserve the run while refreshing status copy in the selected locale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale]);
   const handleCurrentBestChange = useCallback((elapsed: number | null) => {
     setCurrentRulesPersonalBestMs(elapsed);
   }, []);
@@ -517,6 +573,11 @@ export function SoloGame({
       setFinishedAt(null);
       setClockNow(performance.now());
       actionTraceRef.current = [];
+      replayActionTraceRef.current = [];
+      lastReplayStateHashRef.current = hashGameState(pending);
+      replayTruncationReasonRef.current = null;
+      initialFlagsRef.current = [];
+      boardSpecRef.current = null;
       runIdentityRef.current = null;
       runCompletedAtRef.current = null;
       historyEnqueuedRunRef.current = "";
@@ -534,14 +595,14 @@ export function SoloGame({
       setSeed("");
       setBoardHash("");
       setGenerationSummary("");
-      setReviewingTerminalBoard(false);
+      setTerminalDetonatedIndex(undefined);
       setNotice(
         nextConfig.mode === "no_guess"
-          ? "首击后后台生成可逻辑解出的无猜棋盘，最多尝试 50 次或 5 秒。"
-          : "任意位置首击，周围 3×3 保证安全。",
+          ? t("solo.noGuessDescription")
+          : t("solo.classicDescription"),
       );
     },
-    [cancelGeneration, clearCombo, config, preset, replaceGame],
+    [cancelGeneration, clearCombo, config, preset, replaceGame, t],
   );
 
   const finishIfTerminal = useCallback(
@@ -551,7 +612,6 @@ export function SoloGame({
         return;
       }
       setFinishedAt(completedAt);
-      setReviewingTerminalBoard(false);
       setClockNow(completedAt);
       runCompletedAtRef.current = Date.now();
       lastEffectiveInteractionAtRef.current = null;
@@ -560,11 +620,11 @@ export function SoloGame({
       setStatus(next.outcome === "WON" ? "WON" : "LOST");
       setNotice(
         next.outcome === "WON"
-          ? "棋盘已清空。可以立即开始下一张。"
-          : "触雷，本局结束。所有雷位已公开。",
+          ? t("solo.wonNotice")
+          : t("solo.lostNotice"),
       );
     },
-    [],
+    [t],
   );
 
   const recordAction = useCallback(
@@ -572,6 +632,7 @@ export function SoloGame({
       actionType: BoardAction,
       originIndex: number,
       delta: RevealDelta,
+      preStateHash: string,
       comboEligible = false,
       physicalClicks = 1,
     ) => {
@@ -587,7 +648,29 @@ export function SoloGame({
           ? {}
           : { flagged: delta.flagged.flagged }),
       };
+      if (delta.hitMine) {
+        setTerminalDetonatedIndex(
+          delta.revealed.find((cell) => cell.value < 0)?.index ?? originIndex,
+        );
+      }
       actionTraceRef.current.push(countedAction);
+      if (replayActionTraceRef.current.length < SOLO_REPLAY_MAX_ACTIONS) {
+        replayActionTraceRef.current.push({
+          seq: replayActionTraceRef.current.length + 1,
+          elapsedMs:
+            startedAt === null ? 0 : Math.max(0, performance.now() - startedAt),
+          actionType,
+          cellIndex: originIndex,
+          physicalClicks,
+          preStateHash,
+          accepted: delta.accepted,
+          ...(delta.rejectReason ? { rejectReason: delta.rejectReason } : {}),
+          postStateHash: delta.stateHash,
+        });
+      } else {
+        replayTruncationReasonRef.current = "ACTION_LIMIT";
+      }
+      lastReplayStateHashRef.current = delta.stateHash;
       setActionBreakdown((current) =>
         appendActionBreakdown(current, countedAction),
       );
@@ -636,7 +719,7 @@ export function SoloGame({
         comboTimeoutRef.current = null;
       }, 900);
     },
-    [clearCombo],
+    [clearCombo, startedAt],
   );
 
   const beginGame = useCallback(
@@ -651,6 +734,8 @@ export function SoloGame({
     ) => {
       const next = createGameState(createBoard(spec));
       applyFlagsByIndex(flaggedIndexes, next);
+      initialFlagsRef.current = [...new Set(flaggedIndexes)].sort((a, b) => a - b);
+      boardSpecRef.current = Object.freeze({ ...spec });
       const beganAt = performance.now();
       const nextRunIdentity = createSoloRunIdentity();
       runIdentityRef.current = nextRunIdentity;
@@ -660,6 +745,8 @@ export function SoloGame({
       lastEffectiveInteractionAtRef.current =
         document.visibilityState === "visible" ? beganAt : null;
       runEffectiveInteractionMsRef.current = 0;
+      const preStateHash = hashGameState(next);
+      lastReplayStateHashRef.current = preStateHash;
       const delta = revealCell(next, firstIndex);
       setStartedAt(beganAt);
       setFinishedAt(null);
@@ -683,6 +770,7 @@ export function SoloGame({
         "REVEAL",
         firstIndex,
         delta,
+        preStateHash,
         delta.accepted && delta.hitMine !== true,
         options.physicalClicks ?? 1,
       );
@@ -703,7 +791,7 @@ export function SoloGame({
       const requestId = workerRequestRef.current;
       const generationStartedAt = performance.now();
       setStatus("GENERATING");
-      setNotice("正在后台寻找无猜棋盘，计时尚未开始…");
+      setNotice(t("solo.generatingNotice"));
 
       let worker: Worker;
       try {
@@ -714,7 +802,7 @@ export function SoloGame({
       } catch {
         generationActiveRef.current = false;
         setStatus("READY");
-        setNotice("无猜生成器无法启动，请检查浏览器安全策略或改用经典随机。");
+        setNotice(t("solo.workerUnavailable"));
         track("no_guess_generation_finished", {
           preset,
           success: false,
@@ -770,7 +858,7 @@ export function SoloGame({
         if (!event.data.ok) {
           setStatus("READY");
           setNotice(
-            "在 50 次尝试内没有找到无猜棋盘，请调整尺寸、雷数或改用经典随机。",
+            t("solo.generationLimit"),
           );
           track("no_guess_generation_finished", {
             preset,
@@ -792,23 +880,23 @@ export function SoloGame({
           firstIndex,
           flaggedIndexes,
           {
-            generation: `${event.data.attempts} 次尝试 · ${event.data.elapsedMs.toFixed(0)}ms`,
+            generation: t("solo.generationSummary", { attempts: event.data.attempts, elapsed: event.data.elapsedMs.toFixed(0) }),
             physicalClicks,
           },
         );
         if (outcome === "PLAYING") {
-          setNotice("无猜棋盘已验证，计时开始。");
+          setNotice(t("solo.generationVerified"));
         }
       };
       worker.onerror = () => {
         fail(
-          "无猜生成器启动失败，请改用经典随机后重试。",
+          t("solo.generationFailed"),
           "GENERATION_ERROR",
         );
       };
       workerTimeoutRef.current = window.setTimeout(() => {
         fail(
-          "无猜生成超过 5 秒，请调整尺寸、雷数或改用经典随机。",
+          t("solo.generationTimeout"),
           "TIME_LIMIT",
         );
       }, 5_000);
@@ -816,12 +904,12 @@ export function SoloGame({
         worker.postMessage(request);
       } catch {
         fail(
-          "无猜生成器无法接收任务，请改用经典随机后重试。",
+          t("solo.generationPostFailed"),
           "GENERATION_ERROR",
         );
       }
     },
-    [beginGame, cancelGeneration, config, preset, track],
+    [beginGame, cancelGeneration, config, preset, t, track],
   );
 
   const handleBoardAction = useCallback(
@@ -845,16 +933,16 @@ export function SoloGame({
         if (action === "TOGGLE_FLAG") {
           toggleFlag(current, cellIndex);
           setRevision((value) => value + 1);
-          setNotice("首击前旗标会保留，但不计入正式操作统计。");
+          setNotice(t("solo.initialFlags"));
           return;
         }
         if (action === "CHORD") {
           chordCell(current, cellIndex);
-          setNotice("首击前没有可和弦的数字格。");
+          setNotice(t("solo.initialChord"));
           return;
         }
         if (current.visibility[cellIndex] === CELL_FLAGGED) {
-          setNotice("该格已插旗，请先取消旗标。");
+          setNotice(t("solo.flaggedReveal"));
           return;
         }
 
@@ -876,7 +964,7 @@ export function SoloGame({
           physicalClicks,
         });
         if (outcome === "PLAYING") {
-          setNotice("经典随机棋盘，计时开始。");
+          setNotice(t("solo.classicStarted"));
         }
         return;
       }
@@ -886,6 +974,7 @@ export function SoloGame({
         (action === "REVEAL" && isProvablySafeCell(current, cellIndex));
       const actionAt = performance.now();
       recordEffectiveInteraction(actionAt);
+      const preStateHash = lastReplayStateHashRef.current;
       const delta =
         action === "REVEAL"
           ? revealCell(current, cellIndex)
@@ -896,14 +985,15 @@ export function SoloGame({
         action,
         cellIndex,
         delta,
+        preStateHash,
         comboEligible,
         physicalClicks,
       );
       if (!delta.accepted) {
         setNotice(
           delta.rejectReason === "FLAG_COUNT_MISMATCH"
-            ? "相邻旗数还不等于数字，和弦未执行。"
-            : "这个动作没有改变棋盘。",
+            ? t("solo.chordRejected")
+            : t("solo.actionUnchanged"),
         );
       }
       replaceGame(current);
@@ -918,6 +1008,7 @@ export function SoloGame({
       recordAction,
       replaceGame,
       status,
+      t,
     ],
   );
 
@@ -937,7 +1028,7 @@ export function SoloGame({
 
   const chooseMode = (nextMode: SoloGenerationMode) => {
     const nextConfig = { ...config, mode: nextMode };
-    const error = getSoloConfigError(nextConfig);
+    const error = configErrorMessage(nextConfig);
     if (error) {
       setNotice(error);
       return;
@@ -953,7 +1044,7 @@ export function SoloGame({
       mines: Number(draftMines),
       mode,
     };
-    const error = getSoloConfigError(nextConfig);
+    const error = configErrorMessage(nextConfig);
     if (error) {
       setNotice(error);
       return;
@@ -964,7 +1055,7 @@ export function SoloGame({
 
   const chooseCustom = () => {
     setPreset("custom");
-    setNotice("输入宽度、高度和雷数；开始本局前会再次校验。");
+    setNotice(t("solo.customPrompt"));
   };
 
   const startConfiguredGame = () => {
@@ -977,7 +1068,7 @@ export function SoloGame({
             mode,
           }
         : config;
-    const error = getSoloConfigError(nextConfig);
+    const error = configErrorMessage(nextConfig);
     if (error) {
       setNotice(error);
       return;
@@ -1019,7 +1110,7 @@ export function SoloGame({
       setNotice(
         cause instanceof Error
           ? cause.message
-          : "单人偏好未能保存；本局可继续。",
+          : t("solo.preferenceSaveFailed"),
       );
       return false;
     }
@@ -1056,6 +1147,10 @@ export function SoloGame({
     board3BV === null
       ? null
       : calculateIOE(board3BV, actionBreakdown.physicalClicks);
+  const currentRunId = runIdentityRef.current?.runId ?? "";
+  const currentHistoryPending = getPendingHistoryWrites().some(
+    ({ record }) => record.recordId === currentRunId,
+  );
   useEffect(() => {
     const runIdentity = runIdentityRef.current;
     if (
@@ -1077,8 +1172,47 @@ export function SoloGame({
       actions: actionTraceRef.current,
     });
     const actions = countBoardActions(actionTraceRef.current);
-    const record: SoloRunRecordV1 = {
-      schemaVersion: SOLO_RUN_SCHEMA_VERSION,
+    const boardSpec = boardSpecRef.current;
+    if (boardSpec === null) return;
+    let replayActions = [...replayActionTraceRef.current];
+    let replay: SoloReplayV1 = {
+      schemaVersion: SOLO_REPLAY_SCHEMA_VERSION,
+      recordId: runId,
+      initialFlags: initialFlagsRef.current,
+      actions: replayActions,
+    };
+    const encoder = new TextEncoder();
+    if (encoder.encode(JSON.stringify(replay)).byteLength > SOLO_REPLAY_MAX_BYTES) {
+      let low = 0;
+      let high = replayActions.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        const candidate = { ...replay, actions: replayActions.slice(0, middle) };
+        if (encoder.encode(JSON.stringify(candidate)).byteLength <= SOLO_REPLAY_MAX_BYTES) low = middle;
+        else high = middle - 1;
+      }
+      replayActions = replayActions.slice(0, low);
+      replay = { ...replay, actions: replayActions };
+      replayTruncationReasonRef.current = "BYTE_LIMIT";
+    }
+    const replayStatus = replayTruncationReasonRef.current;
+    const replaySummary: SoloRunRecordV2["replay"] =
+      replayStatus === null
+        ? {
+            status: "COMPLETE",
+            schemaVersion: SOLO_REPLAY_SCHEMA_VERSION,
+            actionCount: replay.actions.length,
+            actionLogHash: hashSoloReplay(replay),
+          }
+        : {
+            status: "TRUNCATED",
+            reason: replayStatus,
+            schemaVersion: SOLO_REPLAY_SCHEMA_VERSION,
+            actionCount: replay.actions.length,
+            actionLogHash: hashSoloReplay(replay),
+          };
+    const record: SoloRunRecordV2 = {
+      schemaVersion: SOLO_RUN_SCHEMA_VERSION_V2,
       recordId: runId,
       trainingSessionId,
       completedAt: new Date(completedAt).toISOString(),
@@ -1091,8 +1225,9 @@ export function SoloGame({
         generationMode: config.mode,
       },
       board: {
-        seed,
+        spec: boardSpec,
         boardHash,
+        generatorRulesVersion: 1,
         trustStatus: "LOCAL_UNVERIFIED",
       },
       rules: {
@@ -1114,9 +1249,10 @@ export function SoloGame({
         unflags: actions.unflags,
         chords: actions.chords,
       },
+      replay: replaySummary,
     };
 
-    enqueuePendingHistoryRecord(record);
+    enqueuePendingHistoryRecord(record, replay);
     const runEffectiveInteractionMs = runEffectiveInteractionMsRef.current;
     const trainingProgress =
       preset === "custom"
@@ -1167,7 +1303,7 @@ export function SoloGame({
             }
             if (result.capacity.warning) {
               setNotice(
-                `本局已保存。本地历史容量 ${result.capacity.recordCount.toLocaleString()}/10,000，请及时导出并按需删除。`,
+                t("solo.historyCapacityNotice", { count: result.capacity.recordCount.toLocaleString() }),
               );
             }
           }
@@ -1188,6 +1324,7 @@ export function SoloGame({
     status,
     flushTelemetry,
     track,
+    t,
   ]);
   const progress = Math.round(getProgress(game) * 100);
   const failedPendingHistoryWrites = getPendingHistoryWrites().filter(
@@ -1195,39 +1332,39 @@ export function SoloGame({
   );
   const statusLabel =
     status === "READY"
-      ? "等待首击"
+      ? t("solo.status.ready")
       : status === "GENERATING"
-        ? "生成中"
+        ? t("solo.status.generating")
         : status === "PLAYING"
-          ? "进行中"
+          ? t("solo.status.playing")
           : status === "WON"
-            ? "已完成"
-            : "已触雷";
+            ? t("solo.status.won")
+            : t("solo.status.lost");
   if (!setupComplete) {
     return (
       <section className="solo-shell solo-setup-shell">
         <div className="solo-header solo-setup-header">
           <div>
-            <span className="panel-kicker">LOCAL / RUN CONFIGURATION</span>
-            <h1>配置单人训练</h1>
-            <p>先确定棋盘、生成规则和数据密度。进入对局后，界面只保留棋盘与本局信息。</p>
+            <span className="panel-kicker">{t("solo.kicker.configuration")}</span>
+            <h1>{t("solo.setup.title")}</h1>
+            <p>{t("solo.setup.description")}</p>
           </div>
           <button className="secondary-button solo-exit" type="button" onClick={exitSolo}>
-            返回模式选择
+            {t("solo.backModes")}
           </button>
         </div>
 
-        <div className="solo-setup-panel" aria-label="单人开局配置">
+        <div className="solo-setup-panel" aria-label={t("solo.setup.aria")}>
           <div className="solo-setup-section">
             <div className="solo-setup-heading">
               <span>01</span>
               <div>
-                <strong>棋盘规格</strong>
-                <small>选择预设，或定义宽、高和雷数。</small>
+                <strong>{t("solo.boardSpec")}</strong>
+                <small>{t("solo.boardSpecHelp")}</small>
               </div>
             </div>
             <div className="solo-tabs">
-              {(Object.keys(PRESET_LABELS) as Array<Exclude<SoloPreset, "custom">>).map(
+              {PRESET_KEYS.map(
                 (key) => (
                   <button
                     className={`solo-tab${preset === key ? " is-active" : ""}`}
@@ -1235,7 +1372,7 @@ export function SoloGame({
                     type="button"
                     onClick={() => choosePreset(key)}
                   >
-                    {PRESET_LABELS[key]}
+                    {t(key === "beginner" ? "solo.beginner" : key === "intermediate" ? "solo.intermediate" : "solo.expert")}
                     <small>
                       {SOLO_PRESETS[key].width}×{SOLO_PRESETS[key].height} /{" "}
                       {SOLO_PRESETS[key].mines}
@@ -1248,15 +1385,15 @@ export function SoloGame({
                 type="button"
                 onClick={chooseCustom}
               >
-                自定义
+                {t("solo.custom")}
                 <small>5–100 / ≤10K</small>
               </button>
             </div>
             <div className={`solo-custom-grid${preset === "custom" ? " is-enabled" : ""}`}>
               <label>
-                <span>宽</span>
+                <span>{t("solo.width")}</span>
                 <input
-                  aria-label="自定义宽度"
+                  aria-label={t("solo.customWidth")}
                   inputMode="numeric"
                   max="100"
                   min="5"
@@ -1267,9 +1404,9 @@ export function SoloGame({
                 />
               </label>
               <label>
-                <span>高</span>
+                <span>{t("solo.height")}</span>
                 <input
-                  aria-label="自定义高度"
+                  aria-label={t("solo.customHeight")}
                   inputMode="numeric"
                   max="100"
                   min="5"
@@ -1280,9 +1417,9 @@ export function SoloGame({
                 />
               </label>
               <label>
-                <span>雷</span>
+                <span>{t("solo.mines")}</span>
                 <input
-                  aria-label="自定义雷数"
+                  aria-label={t("solo.customMines")}
                   inputMode="numeric"
                   min="1"
                   type="number"
@@ -1297,7 +1434,7 @@ export function SoloGame({
                 disabled={preset !== "custom"}
                 onClick={applyCustom}
               >
-                校验自定义
+                {t("solo.validateCustom")}
               </button>
             </div>
           </div>
@@ -1306,8 +1443,8 @@ export function SoloGame({
             <div className="solo-setup-heading">
               <span>02</span>
               <div>
-                <strong>生成规则</strong>
-                <small>经典随机立即生成；无猜模式先验证可逻辑解。</small>
+                <strong>{t("solo.generation")}</strong>
+                <small>{t("solo.generationHelp")}</small>
               </div>
             </div>
             <div className="solo-mode-tabs">
@@ -1316,14 +1453,14 @@ export function SoloGame({
                 type="button"
                 onClick={() => chooseMode("classic")}
               >
-                经典随机
+                {t("solo.classic")}
               </button>
               <button
                 className={`solo-mode${mode === "no_guess" ? " is-active" : ""}`}
                 type="button"
                 onClick={() => chooseMode("no_guess")}
               >
-                无猜模式
+                {t("solo.noGuess")}
               </button>
             </div>
           </div>
@@ -1333,16 +1470,16 @@ export function SoloGame({
               <div className="solo-setup-heading">
                 <span>03</span>
                 <div>
-                  <strong>数据层级</strong>
-                  <small>决定对局中展示多少过程指标。</small>
+                  <strong>{t("solo.dataLevel")}</strong>
+                  <small>{t("solo.dataLevelHelp")}</small>
                 </div>
               </div>
-              <div className="solo-compact-tabs" role="group" aria-label="统计数据层级">
+              <div className="solo-compact-tabs" role="group" aria-label={t("solo.dataLevelAria")}>
                 {(
                   [
-                    ["basic", "基础"],
-                    ["advanced", "高级"],
-                    ["analysis", "分析"],
+                    ["basic", t("solo.basic")],
+                    ["advanced", t("solo.advanced")],
+                    ["analysis", t("solo.details")],
                   ] as const
                 ).map(([value, label]) => (
                   <button
@@ -1361,16 +1498,16 @@ export function SoloGame({
               <div className="solo-setup-heading">
                 <span>04</span>
                 <div>
-                  <strong>棋盘显示</strong>
-                  <small>只改变视觉，不改变棋盘与成绩。</small>
+                  <strong>{t("solo.boardDisplay")}</strong>
+                  <small>{t("solo.boardDisplayHelp")}</small>
                 </div>
               </div>
-              <div className="solo-compact-tabs" role="group" aria-label="棋盘显示方案">
+              <div className="solo-compact-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
                 {(
                   [
-                    ["black-gold", "舒适"],
-                    ["classic", "专业"],
-                    ["high-contrast", "高对比"],
+                    ["black-gold", t("solo.comfort")],
+                    ["classic", t("solo.professional")],
+                    ["high-contrast", t("solo.highContrast")],
                   ] as const
                 ).map(([value, label]) => (
                   <button
@@ -1389,16 +1526,16 @@ export function SoloGame({
 
           <div className="solo-setup-launch">
             <div>
-              <span>本局方案</span>
+              <span>{t("solo.runPlan")}</span>
               <strong>
-                {preset === "custom" ? "自定义" : PRESET_LABELS[preset]} ·{" "}
+                {preset === "custom" ? t("solo.custom") : t(preset === "beginner" ? "solo.beginner" : preset === "intermediate" ? "solo.intermediate" : "solo.expert")} ·{" "}
                 {draftWidth}×{draftHeight} / {draftMines} ·{" "}
-                {mode === "no_guess" ? "无猜" : "经典"}
+                {mode === "no_guess" ? t("solo.noGuess") : t("solo.classic")}
               </strong>
-              <p role="status">{notice || "配置确认后再创建棋盘，计时从首击开始。"}</p>
+              <p role="status">{notice || t("solo.readyHelp")}</p>
             </div>
             <button className="primary-button" type="button" onClick={startConfiguredGame}>
-              确认配置 · 进入棋盘
+              {t("solo.start")}
             </button>
           </div>
         </div>
@@ -1419,19 +1556,19 @@ export function SoloGame({
           event.currentTarget.blur();
         }}
       >
-        跳到棋盘
+        {t("solo.skipBoard")}
       </a>
       <div className="solo-header">
         <div>
-          <span className="panel-kicker">LOCAL / SINGLE PLAYER</span>
-          <h1>经典扫雷</h1>
+          <span className="panel-kicker">{t("solo.kicker.game")}</span>
+          <h1>{t("solo.gameTitle")}</h1>
           <p>
-            {preset === "custom" ? "自定义" : PRESET_LABELS[preset]} · {config.width}×{config.height} / {config.mines} ·{" "}
-            {config.mode === "no_guess" ? "无猜模式" : "经典随机"}
+            {preset === "custom" ? t("solo.custom") : t(preset === "beginner" ? "solo.beginner" : preset === "intermediate" ? "solo.intermediate" : "solo.expert")} · {config.width}×{config.height} / {config.mines} ·{" "}
+            {t(config.mode === "no_guess" ? "solo.noGuess" : "solo.classic")}
           </p>
         </div>
         <button className="secondary-button solo-exit" type="button" onClick={returnToSetup}>
-          {status === "PLAYING" || status === "GENERATING" ? "结束本局并更改配置" : "更改配置"}
+          {t(status === "PLAYING" || status === "GENERATING" ? "solo.endAndChange" : "solo.changeConfig")}
         </button>
       </div>
 
@@ -1442,19 +1579,10 @@ export function SoloGame({
           tabIndex={-1}
         >
           <div className="board-toolbar">
-            <span>左键 REVEAL</span>
-            <span>右键 FLAG</span>
-            <span>中键 / 左右键 / 双击 CHORD</span>
+            <span>{t("solo.control.reveal")}</span>
+            <span>{t("solo.control.flag")}</span>
+            <span>{t("solo.control.chord")}</span>
             <span>{config.mode === "no_guess" ? "NO-GUESS" : "CLASSIC"}</span>
-            {reviewingTerminalBoard && (
-              <button
-                className="board-toolbar-action"
-                type="button"
-                onClick={() => setReviewingTerminalBoard(false)}
-              >
-                查看结算
-              </button>
-            )}
           </div>
           <CanvasBoard
             {...(actionVisual === undefined ? {} : { actionVisual })}
@@ -1467,6 +1595,7 @@ export function SoloGame({
             reducedMotion={reducedMotion}
             revision={revision}
             showTerminalMines
+            {...(terminalDetonatedIndex === undefined ? {} : { terminalDetonatedIndex })}
             onAction={handleBoardAction}
             onInputLatency={(latencyMs) => {
               if (inputLatencySamplesRef.current.length < 2_000) {
@@ -1480,73 +1609,52 @@ export function SoloGame({
               className={`flow-combo combo-${Math.min(combo, 12)}`}
               aria-live="polite"
             >
-              <span>FLOW COMBO</span>
+              <span>{t("solo.flowCombo")}</span>
               <strong>×{combo}</strong>
-              <em>{comboCopy(combo)}</em>
+              <em>{t(combo >= 12 ? "solo.combo.max" : combo >= 8 ? "solo.combo.high" : combo >= 5 ? "solo.combo.medium" : "solo.combo.low")}</em>
             </div>
           )}
 
           {status === "GENERATING" && (
             <div className="solo-generating" aria-live="assertive">
-              <span className="panel-kicker">NO-GUESS GENERATION V1</span>
-              <strong>生成无猜棋盘</strong>
-              <p>最多 50 次尝试或 5 秒；生成时间不会计入成绩。</p>
+              <span className="panel-kicker">{t("solo.kicker.noGuessGeneration")}</span>
+              <strong>{t("solo.generatingTitle")}</strong>
+              <p>{t("solo.generatingDescription")}</p>
             </div>
           )}
 
-          {(status === "WON" || status === "LOST") &&
-            !reviewingTerminalBoard && (
-            <div
-              className="result-overlay"
-              role="status"
-              aria-live="assertive"
-              aria-atomic="true"
-            >
-              <span className="panel-kicker">SINGLE PLAYER RESULT</span>
-              <h2>{status === "WON" ? "棋盘完成" : "触雷"}</h2>
-              <p>
-                {formatSoloTime(elapsedMs)} · {actionBreakdown.semanticActions} 次操作 ·{" "}
-                {config.width}×{config.height} / {config.mines}
-              </p>
+        </div>
+
+        <aside className="solo-side-panel">
+          {(status === "WON" || status === "LOST") && (
+            <section className="solo-terminal-panel" role="status" aria-live="assertive">
+              <span className="panel-kicker">{t("solo.kicker.result")}</span>
+              <h2>{t(status === "WON" ? "solo.result.won" : "solo.result.lost")}</h2>
+              <p>{formatSoloTime(elapsedMs)} · {t("solo.resultActions", { count: actionBreakdown.semanticActions })}</p>
               <div className="solo-result-metrics">
-                <span>
-                  {isNewPersonalBest
-                    ? "NEW PERSONAL BEST · LOCAL_UNVERIFIED"
-                    : "LOCAL_UNVERIFIED"}
-                </span>
+                <span>{t(isNewPersonalBest ? "solo.newPersonalBestLocal" : "solo.localUnverified")}</span>
                 <b>3BV {board3BV ?? "—"}</b>
                 <b>3BV/s {formatMetric(threeBvPerSecond)}</b>
                 <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
               </div>
-              <div className="result-actions">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setReviewingTerminalBoard(true)}
-                >
-                  查看棋盘
-                </button>
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={() => resetBoard()}
-                >
-                  新棋盘
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={exitSolo}
-                >
-                  返回首页
-                </button>
+              <div className="solo-terminal-legend" aria-label={t("solo.legend.aria")}>
+                <span>{t("solo.legend.detonated")}</span>
+                <span>{t("solo.legend.mine")}</span>
+                <span>{t("solo.legend.correctFlag")}</span>
+                <span>{t("solo.legend.wrongFlag")}</span>
               </div>
-            </div>
+              <div className="result-actions">
+                {currentHistoryPending ? (
+                  <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
+                ) : (
+                  <a className="primary-button" href={`#/solo/replay/${encodeURIComponent(currentRunId)}`}>{t("solo.analyze")}</a>
+                )}
+                <button className="secondary-button" type="button" onClick={() => resetBoard()}>{t("solo.sameBoard")}</button>
+                <button className="secondary-button" type="button" onClick={exitSolo}>{t("solo.home")}</button>
+              </div>
+            </section>
           )}
-        </div>
-
-        <aside className="solo-side-panel">
-          <span className="panel-kicker">RUN METRICS</span>
+          <span className="panel-kicker">{t("solo.kicker.metrics")}</span>
           <div className="solo-status-line">
             <strong>{statusLabel}</strong>
             <i className={`solo-status-dot status-${status.toLowerCase()}`} />
@@ -1555,25 +1663,25 @@ export function SoloGame({
 
           <div className="solo-stats">
             <div>
-              <span>剩余雷数</span>
+              <span>{t("solo.remainingMines")}</span>
               <strong>{status === "WON" ? 0 : config.mines - flags}</strong>
             </div>
             <div>
-              <span>安全格进度</span>
+              <span>{t("solo.safeProgress")}</span>
               <strong>{progress}%</strong>
             </div>
             <div>
-              <span>操作</span>
+              <span>{t("solo.actions")}</span>
               <strong>{actionBreakdown.semanticActions}</strong>
             </div>
             <div>
-              <span>棋盘</span>
+              <span>{t("solo.board")}</span>
               <strong>
                 {config.width}×{config.height}
               </strong>
             </div>
             <div>
-              <span>当前规则最佳</span>
+              <span>{t("solo.currentBest")}</span>
               <strong>
                 {currentRulesPersonalBestMs === null
                   ? "—"
@@ -1582,20 +1690,20 @@ export function SoloGame({
             </div>
             {legacyPersonalBestMs !== null && (
               <div>
-                <span>旧版 PB 参考</span>
+                <span>{t("solo.legacyBest")}</span>
                 <strong>{formatSoloTime(legacyPersonalBestMs)}</strong>
               </div>
             )}
             <div>
-              <span>验证状态</span>
-              <strong className="solo-trust-label">LOCAL</strong>
+              <span>{t("solo.verification")}</span>
+              <strong className="solo-trust-label">{t("solo.local")}</strong>
             </div>
           </div>
 
           {statsLevel !== "basic" && (
             <div className="solo-stats solo-stats-advanced">
               <div>
-                <span>{coarsePointer ? "动作/秒" : "CPS / Cl/s"}</span>
+                <span>{coarsePointer ? t("solo.actionsPerSecond") : "CPS / Cl/s"}</span>
                 <strong>{formatMetric(cps)}</strong>
               </div>
               <div>
@@ -1607,7 +1715,7 @@ export function SoloGame({
                 <strong>{formatMetric(threeBvPerSecond)}</strong>
               </div>
               <div>
-                <span>{status === "WON" ? "IOE" : "IOE（过程）"}</span>
+                <span>{status === "WON" ? "IOE" : t("solo.ioeProgress")}</span>
                 <strong>
                   {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}
                 </strong>
@@ -1616,21 +1724,21 @@ export function SoloGame({
           )}
 
           {statsLevel === "analysis" && (
-            <div className="solo-analysis" aria-label="动作分析">
+            <div className="solo-analysis" aria-label={t("solo.actionAnalysis")}>
               <span>
-                物理点击 <b>{actionBreakdown.physicalClicks}</b>
+                {t("solo.physicalClicks")} <b>{actionBreakdown.physicalClicks}</b>
               </span>
               <span>
-                接受动作 <b>{actionBreakdown.acceptedActions}</b>
+                {t("solo.acceptedActions")} <b>{actionBreakdown.acceptedActions}</b>
               </span>
               <span>
-                无效动作 <b>{actionBreakdown.wastedActions}</b>
+                {t("solo.wastedActions")} <b>{actionBreakdown.wastedActions}</b>
               </span>
               <span>
-                揭格 / 和弦 <b>{actionBreakdown.reveals} / {actionBreakdown.chords}</b>
+                {t("solo.revealChord")} <b>{actionBreakdown.reveals} / {actionBreakdown.chords}</b>
               </span>
               <span>
-                插旗 / 取消 <b>{actionBreakdown.flags} / {actionBreakdown.unflags}</b>
+                {t("solo.flagUnflag")} <b>{actionBreakdown.flags} / {actionBreakdown.unflags}</b>
               </span>
             </div>
           )}
@@ -1640,12 +1748,12 @@ export function SoloGame({
           </div>
 
           <div className="solo-notice" aria-live="polite">
-            {notice || "判断、节奏、执行。"}
+            {notice || t("solo.mantra")}
           </div>
 
           {(seed || generationSummary) && (
             <div className="solo-proof">
-              <span>BOARD AUDIT</span>
+              <span>{t("solo.boardAudit")}</span>
               {generationSummary && <b>{generationSummary}</b>}
               {boardHash && <code>{boardHash.slice(0, 16)}</code>}
               {seed && <small title={seed}>{seed.slice(-18)}</small>}
@@ -1657,7 +1765,7 @@ export function SoloGame({
             type="button"
             onClick={() => resetBoard()}
           >
-            放弃并换一张
+            {t("solo.abandon")}
           </button>
         </aside>
       </div>
@@ -1668,8 +1776,7 @@ export function SoloGame({
           role="alert"
         >
           <span>
-            记录 {pending.record.recordId.slice(0, 8)} 保存失败：
-            {pending.error ?? "本局成绩未能写入本地历史。"}
+            {t(pending.error?.includes("IndexedDB") ? "solo.saveFailedIndexedDb" : "solo.saveFailed", { id: pending.record.recordId.slice(0, 8) })}
           </span>
           <button
             className="secondary-button"
@@ -1681,7 +1788,7 @@ export function SoloGame({
               );
             }}
           >
-            重试保存
+            {t("solo.retrySave")}
           </button>
         </div>
       ))}

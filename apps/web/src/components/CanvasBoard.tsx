@@ -1,4 +1,5 @@
 import type { GameState } from "@h-minesweeper/game-core";
+import { useLocale } from "../i18n";
 import {
   useCallback,
   useEffect,
@@ -57,6 +58,7 @@ export interface CanvasBoardProps {
   disabled?: boolean;
   reducedMotion?: boolean;
   showTerminalMines?: boolean;
+  terminalDetonatedIndex?: number;
   boardTheme?: BoardTheme;
   effectsProfile?: BoardEffectsProfile;
   actionVisual?: BoardActionVisual;
@@ -467,18 +469,39 @@ function drawWrongFlagMarker(
   context.restore();
 }
 
+function drawCorrectFlagMarker(
+  context: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  metrics: BoardMarkMetrics,
+  palette: BoardPalette,
+) {
+  drawFlagMarker(context, centerX, centerY, metrics, palette);
+  context.save();
+  context.beginPath();
+  context.moveTo(centerX + metrics.iconSize * 0.08, centerY + metrics.iconSize * 0.13);
+  context.lineTo(centerX + metrics.iconSize * 0.2, centerY + metrics.iconSize * 0.25);
+  context.lineTo(centerX + metrics.iconSize * 0.4, centerY - metrics.iconSize * 0.12);
+  context.strokeStyle = "#65d58a";
+  context.lineWidth = metrics.iconLineWidth + 1;
+  context.stroke();
+  context.restore();
+}
+
 export function CanvasBoard({
   game,
   revision,
   disabled = false,
   reducedMotion = false,
   showTerminalMines = false,
+  terminalDetonatedIndex,
   boardTheme = "black-gold",
   effectsProfile = "full",
   actionVisual,
   onAction,
   onInputLatency,
 }: CanvasBoardProps) {
+  const { t } = useLocale();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -718,6 +741,11 @@ export function CanvasBoard({
         game?.outcome === "LOST" &&
         storedVisibility === FLAGGED &&
         !hasMine;
+      const correctFlag =
+        showTerminalMines &&
+        game?.outcome !== "PLAYING" &&
+        storedVisibility === FLAGGED &&
+        hasMine;
       const isPressed = index === pressedIndex;
       const isFocused = index === focusIndex;
 
@@ -765,11 +793,18 @@ export function CanvasBoard({
           markMetrics,
           palette,
         );
+      } else if (correctFlag) {
+        drawCorrectFlagMarker(context, centerX, centerY, markMetrics, palette);
       } else if (visibility === FLAGGED) {
         drawFlagMarker(context, centerX, centerY, markMetrics, palette);
       } else if (visibility === REVEALED && game) {
         if (hasMine) {
           drawMineMarker(context, centerX, centerY, markMetrics, palette);
+          if (terminalDetonatedIndex === index) {
+            context.strokeStyle = "#ffffff";
+            context.lineWidth = Math.max(2, cellSize * 0.1);
+            context.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+          }
         } else {
           const value = game.board.adjacent[index] ?? 0;
           if (value > 0) {
@@ -1088,6 +1123,7 @@ export function CanvasBoard({
     pressedIndex,
     revision,
     showTerminalMines,
+    terminalDetonatedIndex,
     width,
   ]);
 
@@ -1372,27 +1408,27 @@ export function CanvasBoard({
   const focusedCellLabel = (() => {
     const row = Math.floor(focusIndex / width) + 1;
     const column = (focusIndex % width) + 1;
-    if (!game) return `第 ${row} 行，第 ${column} 列，未开始`;
+    if (!game) return t("board.cell.notStarted", { row, column });
     const visibility = game.visibility[focusIndex] ?? HIDDEN;
     if (visibility === FLAGGED) {
-      return `第 ${row} 行，第 ${column} 列，已插旗`;
+      return t("board.cell.flagged", { row, column });
     }
     if (visibility !== REVEALED) {
-      return `第 ${row} 行，第 ${column} 列，未揭开`;
+      return t("board.cell.hidden", { row, column });
     }
     if (game.board.mines[focusIndex] === 1) {
-      return `第 ${row} 行，第 ${column} 列，地雷`;
+      return t("board.cell.mine", { row, column });
     }
     const adjacent = game.board.adjacent[focusIndex] ?? 0;
     return adjacent === 0
-      ? `第 ${row} 行，第 ${column} 列，空白`
-      : `第 ${row} 行，第 ${column} 列，数字 ${adjacent}`;
+      ? t("board.cell.empty", { row, column })
+      : t("board.cell.number", { row, column, value: adjacent });
   })();
 
   return (
     <div className="board-viewport">
-      <div className="board-zoom-controls" role="group" aria-label="棋盘缩放">
-        <span aria-live="polite">格宽 {cellSize}px</span>
+      <div className="board-zoom-controls" role="group" aria-label={t("board.zoom")}>
+        <span aria-live="polite">{t("board.cellWidth", { size: cellSize })}</span>
         <button
           type="button"
           onClick={() => setZoomOffset((current) => current - ZOOM_STEP)}
@@ -1400,7 +1436,7 @@ export function CanvasBoard({
             cellSize <=
             (coarsePointer ? COARSE_ZOOM_MIN_CELL_SIZE : MIN_CELL_SIZE)
           }
-          aria-label="缩小棋盘"
+          aria-label={t("board.zoomOut")}
         >
           −
         </button>
@@ -1409,7 +1445,7 @@ export function CanvasBoard({
           onClick={() => setZoomOffset(0)}
           disabled={zoomOffset === 0}
         >
-          重置
+          {t("board.resetZoom")}
         </button>
         <button
           type="button"
@@ -1418,7 +1454,7 @@ export function CanvasBoard({
             cellSize >=
             (coarsePointer ? COARSE_MAX_CELL_SIZE : MAX_CELL_SIZE)
           }
-          aria-label="放大棋盘"
+          aria-label={t("board.zoomIn")}
         >
           +
         </button>
@@ -1436,7 +1472,7 @@ export function CanvasBoard({
             className={`mine-board${disabled ? " is-disabled" : ""}${reducedMotion ? " reduced-motion" : ""}`}
             role="grid"
             tabIndex={0}
-            aria-label={`${width} 乘 ${height} 扫雷棋盘。${focusedCellLabel}。方向键移动，回车揭格，F 插旗，C 或双击数字格和弦。`}
+            aria-label={t("board.aria", { width, height, cell: focusedCellLabel })}
             onContextMenu={(event) => event.preventDefault()}
             onDoubleClick={handleDoubleClick}
             onKeyDown={handleKeyDown}

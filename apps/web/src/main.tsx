@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { TelemetryPrivacyProvider } from "./components/TelemetryPrivacy";
+import { LocaleProvider } from "./i18n";
 import {
   APP_VERSION,
   BUILD_REGION,
@@ -32,8 +33,10 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <TelemetryPrivacyProvider>
-      <App />
-    </TelemetryPrivacyProvider>
+    <LocaleProvider>
+      <TelemetryPrivacyProvider>
+        <App />
+      </TelemetryPrivacyProvider>
+    </LocaleProvider>
   </StrictMode>,
 );

@@ -1080,7 +1080,11 @@ export type SolverRule =
   | "SINGLE_SAFE"
   | "SINGLE_MINE"
   | "SUBSET_SAFE"
-  | "SUBSET_MINE";
+  | "SUBSET_MINE"
+  | "GLOBAL_SAFE"
+  | "GLOBAL_MINE"
+  | "CSP_SAFE"
+  | "CSP_MINE";
 
 export interface SolverProofStep {
   readonly sequence: number;
@@ -1325,6 +1329,175 @@ export function isProvablySafeCell(
     }
   }
   return false;
+}
+
+/** A replay-safe board view. `clues` uses -1 for every unrevealed cell. */
+export interface VisibleBoardState {
+  readonly width: number;
+  readonly height: number;
+  readonly totalMines: number;
+  readonly clues: readonly number[];
+  /** Player flags are claims only and never become solver facts. */
+  readonly playerClaims: readonly number[];
+}
+
+export type VisibleAnalysisStatus = "COMPLETE" | "PARTIAL" | "CONTRADICTION";
+
+export interface VisibleBoardProof {
+  readonly rule: Exclude<SolverRule, "INITIAL_SAFE">;
+  readonly sources: readonly number[];
+  readonly targets: readonly number[];
+  readonly kind: "SAFE" | "MINE";
+  readonly stateHash: string;
+}
+
+export interface VisibleBoardAnalysis {
+  readonly status: VisibleAnalysisStatus;
+  readonly proofs: readonly VisibleBoardProof[];
+  readonly searchedNodes: number;
+  readonly stateHash: string;
+}
+
+export function hashVisibleBoardState(state: VisibleBoardState): string {
+  const claims = [...new Set(state.playerClaims)].sort((a, b) => a - b);
+  const input = `${state.width}x${state.height}:${state.totalMines}:${state.clues.join(",")}:${claims.join(",")}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function collectVisibleConstraints(state: VisibleBoardState): Constraint[] | null {
+  if (
+    !Number.isSafeInteger(state.width) || state.width <= 0 ||
+    !Number.isSafeInteger(state.height) || state.height <= 0 ||
+    state.clues.length !== state.width * state.height ||
+    !Number.isSafeInteger(state.totalMines) || state.totalMines < 0
+  ) return null;
+  const constraints: Constraint[] = [];
+  for (let source = 0; source < state.clues.length; source += 1) {
+    const clue = state.clues[source];
+    if (clue === undefined || clue < 0) continue;
+    if (!Number.isSafeInteger(clue) || clue > 8) return null;
+    const cells = getNeighborIndices(state.width, state.height, source)
+      .filter((index) => (state.clues[index] ?? -1) < 0)
+      .sort((a, b) => a - b);
+    if (clue > cells.length) return null;
+    if (cells.length > 0) constraints.push({ source, cells, remainingMines: clue });
+    else if (clue !== 0) return null;
+  }
+  return constraints;
+}
+
+/**
+ * Deterministic replay analysis using visible information only. Search effort
+ * is a node count, so the answer does not change with device speed.
+ */
+export function analyzeVisibleBoard(
+  state: VisibleBoardState,
+  nodeBudget = 100_000,
+): VisibleBoardAnalysis {
+  const stateHash = hashVisibleBoardState(state);
+  const constraints = collectVisibleConstraints(state);
+  if (!constraints || !Number.isSafeInteger(nodeBudget) || nodeBudget < 1) {
+    return { status: "CONTRADICTION", proofs: [], searchedNodes: 0, stateHash };
+  }
+  const local = collectDeductions(constraints);
+  const hidden = state.clues.flatMap((clue, index) => clue < 0 ? [index] : []);
+  const proofs: VisibleBoardProof[] = local.map((proof) => ({ ...proof, stateHash }));
+  if (state.totalMines > hidden.length) {
+    return { status: "CONTRADICTION", proofs, searchedNodes: 0, stateHash };
+  }
+  if (state.totalMines === 0 || state.totalMines === hidden.length) {
+    proofs.push({
+      rule: state.totalMines === 0 ? "GLOBAL_SAFE" : "GLOBAL_MINE",
+      sources: [], targets: hidden,
+      kind: state.totalMines === 0 ? "SAFE" : "MINE", stateHash,
+    });
+    return { status: "COMPLETE", proofs, searchedNodes: 0, stateHash };
+  }
+
+  const frontier = [...new Set(constraints.flatMap((item) => item.cells))]
+    .sort((a, b) => a - b);
+  const frontierPosition = new Map(frontier.map((cell, index) => [cell, index]));
+  const frontierSet = new Set(frontier);
+  const unconstrained = hidden.filter((cell) => !frontierSet.has(cell));
+  const unconstrainedCount = unconstrained.length;
+  const values = new Uint8Array(frontier.length);
+  const mineSeen = new Uint8Array(frontier.length);
+  const safeSeen = new Uint8Array(frontier.length);
+  let searchedNodes = 0;
+  let solutions = 0;
+  const unconstrainedMineCounts = new Set<number>();
+  let exhausted = false;
+  const search = (position: number, assignedMines: number): void => {
+    if (exhausted) return;
+    searchedNodes += 1;
+    if (searchedNodes > nodeBudget) { exhausted = true; return; }
+    for (const constraint of constraints) {
+      let mines = 0;
+      let unknown = 0;
+      for (const cell of constraint.cells) {
+        const variable = frontierPosition.get(cell)!;
+        if (variable < position) mines += values[variable] ?? 0;
+        else unknown += 1;
+      }
+      if (mines > constraint.remainingMines || mines + unknown < constraint.remainingMines) return;
+    }
+    if (position === frontier.length) {
+      if (assignedMines > state.totalMines || assignedMines + unconstrainedCount < state.totalMines) return;
+      solutions += 1;
+      unconstrainedMineCounts.add(state.totalMines - assignedMines);
+      for (let index = 0; index < values.length; index += 1) {
+        if (values[index] === 1) mineSeen[index] = 1;
+        else safeSeen[index] = 1;
+      }
+      return;
+    }
+    values[position] = 0; search(position + 1, assignedMines);
+    values[position] = 1; search(position + 1, assignedMines + 1);
+  };
+  search(0, 0);
+  if (!exhausted && solutions === 0) {
+    return { status: "CONTRADICTION", proofs, searchedNodes, stateHash };
+  }
+  if (!exhausted) {
+    const localTargets = new Set(proofs.flatMap((proof) => proof.targets));
+    for (let index = 0; index < frontier.length; index += 1) {
+      const target = frontier[index]!;
+      if (localTargets.has(target)) continue;
+      if (mineSeen[index] === 0 || safeSeen[index] === 0) {
+        const kind = mineSeen[index] === 0 ? "SAFE" : "MINE";
+        proofs.push({
+          rule: kind === "SAFE" ? "CSP_SAFE" : "CSP_MINE",
+          sources: constraints.filter((item) => item.cells.includes(target)).map((item) => item.source),
+          targets: [target], kind, stateHash,
+        });
+      }
+    }
+    if (
+      unconstrained.length > 0 &&
+      (unconstrainedMineCounts.size === 1) &&
+      (unconstrainedMineCounts.has(0) || unconstrainedMineCounts.has(unconstrained.length))
+    ) {
+      const kind = unconstrainedMineCounts.has(0) ? "SAFE" : "MINE";
+      proofs.push({
+        rule: kind === "SAFE" ? "GLOBAL_SAFE" : "GLOBAL_MINE",
+        sources: constraints.map(({ source }) => source),
+        targets: unconstrained,
+        kind,
+        stateHash,
+      });
+    }
+  }
+  return {
+    status: exhausted ? "PARTIAL" : "COMPLETE",
+    proofs,
+    searchedNodes: Math.min(searchedNodes, nodeBudget),
+    stateHash,
+  };
 }
 
 export function solveNoGuess(board: Board): NoGuessSolveResult {

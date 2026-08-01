@@ -12,18 +12,9 @@ import {
   type RoomPlayer,
   type ServerMessage,
 } from "@h-minesweeper/game-core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Academy } from "./components/Academy";
-import {
-  CanvasBoard,
-  type BoardAction,
-  type BoardActionVisual,
-} from "./components/CanvasBoard";
-import {
-  ProgressChart,
-  type ProgressPoint,
-} from "./components/ProgressChart";
-import { SoloGame } from "./components/SoloGame";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { BoardAction, BoardActionVisual } from "./components/CanvasBoard";
+import type { ProgressPoint } from "./components/ProgressChart";
 import {
   ApiError,
   createGuestSession,
@@ -33,8 +24,14 @@ import {
 } from "./lib/api";
 import { formatDuration, formatRtt, normalizeRoomCode } from "./lib/format";
 import { percentile, recordMetric } from "./lib/performance";
-import type { SoloGenerationMode } from "./lib/solo";
+import type { SoloBoardConfig, SoloGenerationMode } from "./lib/solo";
 import { useTelemetry } from "./components/TelemetryPrivacy";
+
+const Academy = lazy(() => import("./components/Academy").then((module) => ({ default: module.Academy })));
+const SoloGame = lazy(() => import("./components/SoloGame").then((module) => ({ default: module.SoloGame })));
+const ReplayReview = lazy(() => import("./components/ReplayReview").then((module) => ({ default: module.ReplayReview })));
+const CanvasBoard = lazy(() => import("./components/CanvasBoard").then((module) => ({ default: module.CanvasBoard })));
+const ProgressChart = lazy(() => import("./components/ProgressChart").then((module) => ({ default: module.ProgressChart })));
 import {
   RealtimeClient,
   captureOptimisticGameState,
@@ -45,6 +42,7 @@ import {
   type OptimisticGameSnapshot,
 } from "./lib/realtime";
 import { DUEL_EXPERIMENT_ENABLED } from "./lib/build-config";
+import { LocaleToggle, useLocale, type MessageId, type MessageValues } from "./i18n";
 
 type UiPhase =
   | "HOME"
@@ -55,7 +53,7 @@ type UiPhase =
   | "MATCH_RESULT";
 
 type HomeMode = "solo" | "academy" | "duel";
-type LocalMode = "solo" | "academy" | null;
+type LocalMode = "solo" | "academy" | "replay" | null;
 type MotionPreference = "system" | "full" | "reduced";
 type EffectsProfile = "full" | "lite" | "essential";
 
@@ -67,9 +65,19 @@ interface PendingOptimisticAction {
 }
 
 function readLocalModeFromLocation(): LocalMode {
+  if (window.location.hash.startsWith("#/solo/replay/")) return "replay";
   if (window.location.hash.startsWith("#/solo")) return "solo";
-  if (window.location.hash === "#/academy") return "academy";
+  if (window.location.hash.startsWith("#/academy")) return "academy";
   return null;
+}
+
+function readReplayRecordId(): string {
+  try {
+    const recordId = decodeURIComponent(window.location.hash.slice("#/solo/replay/".length));
+    return /^[A-Za-z0-9._:-]{1,128}$/.test(recordId) ? recordId : "";
+  } catch {
+    return "";
+  }
 }
 
 function readInvitedRoomCode(): string {
@@ -84,23 +92,25 @@ function readInitialHomeMode(): HomeMode {
   return readInvitedRoomCode() ? "duel" : "solo";
 }
 
-function duelEntryError(error: unknown): string {
+type Translator = (id: MessageId, values?: MessageValues) => string;
+
+function duelEntryError(error: unknown, t: Translator): string {
   if (!(error instanceof ApiError)) {
-    return "无法进入 1v1 房间；你可以返回单人训练，不会影响本地历史。";
+    return t("duel.entry.generic");
   }
   if (error.code === "ROOM_FULL") {
-    return "该房间已有两名玩家。请让房主创建新邀请，或返回单人训练。";
+    return t("duel.entry.full");
   }
   if (error.code === "ROOM_NOT_FOUND") {
-    return "房间不存在、已过期或比赛已结束。请检查邀请链接，或让房主重新创建。";
+    return t("duel.entry.notFound");
   }
   if (error.code === "ALREADY_JOINED") {
-    return "这个测试身份已经在该房间中；请回到原页面，或创建新房间。";
+    return t("duel.entry.joined");
   }
   if (error.code === "RATE_LIMITED") {
-    return "进入房间过于频繁，请稍后重试；单人训练仍可继续。";
+    return t("duel.entry.rateLimited");
   }
-  return error.message || "无法进入 1v1 房间。";
+  return t("duel.entry.generic");
 }
 
 function duelInviteUrl(roomCode: string): string {
@@ -187,29 +197,30 @@ function resultCopy(
   localPlayerId: string,
   reason: string | undefined,
   match: boolean,
+  t: Translator,
 ): ResultSummary {
-  const prefix = match ? "整场" : "本轮";
   if (!winnerId) {
     return {
-      title: `${prefix}平局`,
+      title: t(match ? "duel.result.matchDraw" : "duel.result.roundDraw"),
       detail: match
-        ? "本场不计结果"
+        ? t("duel.result.noMatch")
         : reason === "NO_CONTEST"
-          ? "本局不计结果"
-          : "双方进入下一张棋盘",
+          ? t("duel.result.noRound")
+          : t("duel.result.nextBoard"),
       ...(reason === undefined ? {} : { reason }),
     };
   }
   const won = winnerId === localPlayerId;
   return {
-    title: won ? `${prefix}胜利` : `${prefix}失利`,
-    detail: won ? "节奏、判断、执行——你先完成了协议。" : "复盘领先变化，下一局立刻追回来。",
+    title: t(match ? won ? "duel.result.matchWin" : "duel.result.matchLoss" : won ? "duel.result.roundWin" : "duel.result.roundLoss"),
+    detail: t(won ? "duel.result.winDetail" : "duel.result.lossDetail"),
     winnerId,
     ...(reason === undefined ? {} : { reason }),
   };
 }
 
 export function App() {
+  const { persistenceWarning, t } = useLocale();
   const { flush: flushTelemetry, track } = useTelemetry();
   const realtimeRef = useRef(new RealtimeClient());
   const gameRef = useRef<GameState | null>(null);
@@ -236,6 +247,7 @@ export function App() {
   );
   const [soloLaunchMode, setSoloLaunchMode] =
     useState<SoloGenerationMode>(readSoloLaunchModeFromLocation);
+  const [soloLaunchConfig, setSoloLaunchConfig] = useState<SoloBoardConfig | undefined>();
   const [homeMode, setHomeMode] = useState<HomeMode>(readInitialHomeMode);
   const [connection, setConnection] = useState<ConnectionStatus>("disconnected");
   const [displayName, setDisplayName] = useState(
@@ -326,7 +338,11 @@ export function App() {
       window.scrollTo({ top: 0, behavior: "auto" });
     };
     window.addEventListener("popstate", handleNavigation);
-    return () => window.removeEventListener("popstate", handleNavigation);
+    window.addEventListener("hashchange", handleNavigation);
+    return () => {
+      window.removeEventListener("popstate", handleNavigation);
+      window.removeEventListener("hashchange", handleNavigation);
+    };
   }, []);
 
   useEffect(() => {
@@ -431,8 +447,8 @@ export function App() {
     setConnectionLost(true);
     setRoundFinishedAt((current) => current ?? Date.now());
     setResult({
-      title: "技术 DNF",
-      detail: "实时连接已中断，本场操作已冻结。阶段 0 不提供重连。",
+      title: t("duel.result.technical"),
+      detail: t("duel.result.technicalDetail"),
       reason: "TECHNICAL_DNF",
     });
     setPhase("MATCH_RESULT");
@@ -441,7 +457,7 @@ export function App() {
       round: roundRef.current,
     });
     void flushTelemetry();
-  }, [flushTelemetry, track]);
+  }, [flushTelemetry, t, track]);
 
   const failIntegrity = useCallback((detail: string) => {
     pendingActionsRef.current.clear();
@@ -449,11 +465,11 @@ export function App() {
     setConnectionLost(true);
     setRoundFinishedAt((current) => current ?? Date.now());
     setResult({
-      title: "状态完整性失败",
+      title: t("duel.result.integrity"),
       detail,
       reason: "STATE_DIVERGENCE",
     });
-    setError("客户端与权威状态不一致，本场已安全冻结。");
+    setError(t("duel.error.integrity"));
     setPhase("MATCH_RESULT");
     realtimeRef.current.disconnect();
     track("duel_dnf", {
@@ -461,7 +477,7 @@ export function App() {
       round: roundRef.current,
     });
     void flushTelemetry();
-  }, [flushTelemetry, track]);
+  }, [flushTelemetry, t, track]);
 
   const handleConnectionStatus = useCallback(
     (status: ConnectionStatus) => {
@@ -480,13 +496,13 @@ export function App() {
         return;
       }
       if (phaseRef.current === "LOBBY") {
-        setError("实时连接已中断，请重新创建或加入房间。");
+        setError(t("duel.error.connectionLost"));
         setPhase("HOME");
         return;
       }
       markTechnicalDisconnect();
     },
-    [markTechnicalDisconnect],
+    [markTechnicalDisconnect, t],
   );
 
   const sendAction = useCallback(
@@ -497,7 +513,7 @@ export function App() {
       pendingAction?: PendingOptimisticAction,
     ) => {
       if (!baseStateHash) {
-        setError("尚未取得可提交操作的权威状态基线。");
+        setError(t("duel.error.noBaseline"));
         return false;
       }
       actionCounterRef.current += 1;
@@ -522,11 +538,11 @@ export function App() {
       });
       if (!sent) {
         pendingActionsRef.current.delete(clientActionId);
-        setError("实时连接不可用，操作未发送。");
+        setError(t("duel.error.unavailable"));
       }
       return sent;
     },
-    [connectionEpoch, lastServerSeq, matchId, playerId, roomId],
+    [connectionEpoch, lastServerSeq, matchId, playerId, roomId, t],
   );
 
   const updatePlayers = useCallback(
@@ -562,7 +578,7 @@ export function App() {
         );
         if (sequenceStatus === "DUPLICATE") return;
         if (sequenceStatus === "GAP") {
-          failIntegrity("检测到不可恢复的服务端序号缺口；阶段 0 按技术 DNF 处理。");
+          failIntegrity(t("duel.integrity.sequenceGap"));
           return;
         }
         processedServerSeqRef.current = message.serverSeq;
@@ -578,7 +594,7 @@ export function App() {
           setMatchId(message.matchId);
           setConnectionEpoch(message.connectionEpoch);
           setPhase("LOBBY");
-          setNotice("实时通道已建立");
+          setNotice(t("duel.notice.connected"));
           break;
         }
         case "ROOM_STATE": {
@@ -587,7 +603,7 @@ export function App() {
           if (message.matchId) setMatchId(message.matchId);
           if (message.phase === "REMATCH") {
             const votes = message.players.filter((player) => player.rematch).length;
-            setNotice(`重赛确认 ${votes}/2`);
+            setNotice(t("duel.notice.rematchVotes", { votes }));
           } else if (message.phase !== "CLOSED") {
             setPhase(message.phase);
           }
@@ -598,14 +614,14 @@ export function App() {
             message.boardVisibility !== "client_seed" ||
             !("seed" in message.boardSpec)
           ) {
-            setError("当前 Alpha 客户端不支持服务器保密棋盘。");
+            setError(t("duel.error.privateBoard"));
             return;
           }
           try {
             gameRef.current = createGameState(createBoard(message.boardSpec));
             setGameRevision((value) => value + 1);
           } catch (cause) {
-            setError(cause instanceof Error ? cause.message : "棋盘生成失败");
+            setError(t("duel.error.boardGeneration"));
           }
           setRound(message.round);
           setCountdownDeadline(
@@ -648,11 +664,11 @@ export function App() {
             pendingActionsRef.current.size,
           );
           if (message.accepted === false) {
-            setNotice(message.rejectReason ?? "操作未被服务器接受");
+            setNotice(t("duel.notice.rejected"));
           }
           if (reconciliationPlan === "WAIT_FOR_SNAPSHOT") {
             snapshotRequiredRef.current = true;
-            setNotice("操作需要权威快照对账，后续输入已暂时冻结。");
+            setNotice(t("duel.notice.reconciling"));
             return;
           }
           const activeGame = gameRef.current;
@@ -679,7 +695,7 @@ export function App() {
               localStateHash !== expectedLocalHash ||
               localStateHash !== message.authoritativeStateHash
             ) {
-              failIntegrity("操作对账后本地棋盘与权威状态哈希不一致。");
+              failIntegrity(t("duel.integrity.actionHash"));
               return;
             }
           }
@@ -734,6 +750,7 @@ export function App() {
               playerIdRef.current,
               message.reason,
               false,
+              t,
             ),
           );
           setPhase("ROUND_RESULT");
@@ -750,6 +767,7 @@ export function App() {
               playerIdRef.current,
               message.reason,
               true,
+              t,
             ),
           );
           setPhase("MATCH_RESULT");
@@ -782,7 +800,7 @@ export function App() {
           snapshotRequiredRef.current = false;
           setRoundFinishedAt(null);
           setPhase("LOBBY");
-          setNotice("新比赛已建立，等待双方准备");
+          setNotice(t("duel.notice.newMatch"));
           break;
         }
         case "SNAPSHOT": {
@@ -804,6 +822,7 @@ export function App() {
                 playerIdRef.current,
                 snapshot.matchResult.reason,
                 true,
+                t,
               ),
             );
           }
@@ -817,7 +836,7 @@ export function App() {
               if (
                 snapshot.ownGame.visibility.length !== restored.visibility.length
               ) {
-                failIntegrity("权威快照尺寸与棋盘清单不一致。");
+                failIntegrity(t("duel.integrity.snapshotSize"));
                 return;
               }
               restored.visibility.set(snapshot.ownGame.visibility);
@@ -829,14 +848,14 @@ export function App() {
               );
               restored.outcome = snapshot.ownGame.outcome;
               if (hashGameState(restored) !== snapshot.ownGame.stateHash) {
-                failIntegrity("权威快照未通过本地确定性哈希校验。");
+                failIntegrity(t("duel.integrity.snapshotHash"));
                 return;
               }
               gameRef.current = restored;
               setAuthoritativeHash(snapshot.ownGame.stateHash);
               setGameRevision((value) => value + 1);
             } catch {
-              failIntegrity("权威快照无法按当前规则版本恢复。");
+              failIntegrity(t("duel.integrity.snapshotRestore"));
               return;
             }
           } else {
@@ -848,7 +867,7 @@ export function App() {
             );
           }
           if (snapshot.phase === "REMATCH") {
-            setNotice("等待对手确认重赛");
+            setNotice(t("duel.notice.rematchWaiting"));
           } else if (snapshot.phase !== "CLOSED") {
             setPhase(snapshot.phase);
           }
@@ -859,11 +878,11 @@ export function App() {
             protocolBlockedRef.current = true;
             snapshotRequiredRef.current = true;
             pendingActionsRef.current.clear();
-            setError("客户端版本与实时服务不兼容，请刷新或升级后重试。");
-            setNotice("需要升级客户端");
+            setError(t("duel.error.protocol"));
+            setNotice(t("duel.notice.upgrade"));
             break;
           }
-          setError(message.message);
+          setError(t("duel.entry.generic"));
           break;
         }
         case "PONG": {
@@ -871,21 +890,21 @@ export function App() {
         }
       }
     },
-    [failIntegrity, flushTelemetry, track, updatePlayers],
+    [failIntegrity, flushTelemetry, t, track, updatePlayers],
   );
 
   const enterRoom = async (mode: "create" | "join") => {
     if (!DUEL_EXPERIMENT_ENABLED) {
-      setError("1v1 实验当前关闭；专业单人训练仍可正常使用。");
+      setError(t("duel.error.closed"));
       return;
     }
     const name = displayName.trim();
     if (name.length < 2) {
-      setError("昵称至少需要 2 个字符");
+      setError(t("duel.error.nickname"));
       return;
     }
     if (mode === "join" && joinCode.length !== 6) {
-      setError("请输入 6 位房间码");
+      setError(t("duel.error.roomCode"));
       return;
     }
 
@@ -924,7 +943,7 @@ export function App() {
       }
       void flushTelemetry();
     } catch (cause) {
-      setError(duelEntryError(cause));
+      setError(duelEntryError(cause, t));
       setConnection("error");
     } finally {
       setBusy(false);
@@ -1026,6 +1045,7 @@ export function App() {
 
   const enterSolo = (soloMode: SoloGenerationMode = "classic") => {
     leaveRoom();
+    setSoloLaunchConfig(undefined);
     track("mode_selected", { mode: "solo", source: "home" });
     pushLocalMode("solo", soloMode);
   };
@@ -1036,7 +1056,7 @@ export function App() {
     pushLocalMode("academy");
   };
 
-  const openSoloFromAcademy = (soloMode: SoloGenerationMode) => {
+  const openSoloFromAcademy = (soloMode: SoloGenerationMode, board?: { width: number; height: number; mines: number }) => {
     leaveRoom();
     track("mode_selected", { mode: "solo", source: "navigation" });
     const hash =
@@ -1047,6 +1067,7 @@ export function App() {
       hash,
     );
     setSoloLaunchMode(soloMode);
+    setSoloLaunchConfig(board ? { ...board, mode: soloMode } : undefined);
     setLocalMode("solo");
     window.scrollTo({ top: 0, behavior: "auto" });
   };
@@ -1105,7 +1126,7 @@ export function App() {
           event.currentTarget.blur();
         }}
       >
-        跳到主要内容
+        {t("nav.skip")}
       </a>
       <header className="topbar">
         <button
@@ -1121,8 +1142,8 @@ export function App() {
         >
           <span className="brand-mark">H</span>
           <span>
-            <strong>MINESWEEPER</strong>
-            <small>PROFESSIONAL SOLO / ALPHA</small>
+            <strong>{t("brand.minesweeper")}</strong>
+            <small>{t("brand.subtitle")}</small>
           </span>
         </button>
         <div className="topbar-status" aria-live="polite">
@@ -1131,34 +1152,35 @@ export function App() {
           />
           {localMode
             ? localMode === "solo"
-              ? "LOCAL SOLO"
-              : "ACADEMY"
+              ? t("status.localSolo")
+              : localMode === "replay" ? t("status.localReplay") : t("status.academy")
             : connection === "connected"
-              ? "REALTIME ONLINE"
-              : "LOCAL STANDBY"}
+              ? t("status.online")
+              : t("status.standby")}
           <span className="divider" />
-          {localMode ? "NO NETWORK" : formatRtt(rttMs)}
+          {localMode ? t("status.noNetwork") : formatRtt(rttMs)}
+          <LocaleToggle className="text-toggle language-toggle" />
           <button
             className="text-toggle"
             type="button"
-            aria-label="切换动态效果偏好"
+            aria-label={t("motion.aria")}
             onClick={() => {
               const next = nextMotionPreference(motionPreference);
               setMotionPreference(next);
               safeLocalStorageSet(MOTION_PREFERENCE_KEY, next);
             }}
           >
-            动效：
+            {t("motion.label")}
             {motionPreference === "system"
-              ? "跟随系统"
+              ? t("motion.system")
               : motionPreference === "full"
-                ? "完整"
-                : "减少"}
+                ? t("motion.full")
+                : t("motion.reduced")}
           </button>
           <button
             className="text-toggle effects-toggle"
             type="button"
-            aria-label="切换装饰效果档位"
+            aria-label={t("effects.aria")}
             disabled={reducedMotion}
             onClick={() => {
               const next = nextEffectsProfile(effectsPreference);
@@ -1167,22 +1189,32 @@ export function App() {
               safeLocalStorageSet(EFFECTS_PROFILE_KEY, next);
             }}
           >
-            特效：
+            {t("effects.label")}
             {effectsProfile === "full"
-              ? "完整"
+              ? t("effects.full")
               : effectsProfile === "lite"
-                ? "轻量"
-                : "核心"}
+                ? t("effects.lite")
+                : t("effects.essential")}
           </button>
         </div>
       </header>
 
+      {persistenceWarning && (
+        <div className="locale-warning" role="status">
+          {persistenceWarning}
+        </div>
+      )}
+
       <main id="main-content" tabIndex={-1}>
-        {localMode === "solo" ? (
+        <Suspense fallback={<div className="loading-panel" role="status">{t("common.loading")}</div>}>
+        {localMode === "replay" ? (
+          <ReplayReview recordId={readReplayRecordId()} onExit={exitLocalMode} />
+        ) : localMode === "solo" ? (
           <SoloGame
-            key={`solo-${soloLaunchMode}`}
+            key={`solo-${soloLaunchMode}-${soloLaunchConfig?.width ?? "saved"}-${soloLaunchConfig?.height ?? "saved"}-${soloLaunchConfig?.mines ?? "saved"}`}
             effectsProfile={effectsProfile}
             initialGenerationMode={soloLaunchMode}
+            {...(soloLaunchConfig ? { initialBoardConfig: soloLaunchConfig } : {})}
             reducedMotion={reducedMotion}
             onExit={exitLocalMode}
           />
@@ -1227,51 +1259,26 @@ export function App() {
               aria-atomic="true"
             >
               <p className="eyebrow">
-                {homeMode === "solo"
-                  ? "BUILD A MEMORY. TRAIN THE GAP."
-                  : homeMode === "academy"
-                    ? "LEARN THE LOGIC. OWN THE BOARD."
-                    : "SAME BOARD. SAME CLOCK. NO EXCUSES."}
+                {t(homeMode === "solo" ? "home.solo.eyebrow" : homeMode === "academy" ? "home.academy.eyebrow" : "home.duel.eyebrow")}
               </p>
               <h1>
-                {homeMode === "solo" ? (
-                  <>每一局，<br />都成为下一局的依据。</>
-                ) : homeMode === "academy" ? (
-                  <>看懂每一步，<br />再把速度练成本能。</>
-                ) : (
-                  <>扫雷，终于<br />有了对手。</>
-                )}
+                {t(homeMode === "solo" ? "home.solo.title" : homeMode === "academy" ? "home.academy.title" : "home.duel.title")}
               </h1>
               <p className="hero-description">
-                {homeMode === "solo" ? (
-                  <>
-                    用可信的本地历史看见速度、效率与无效动作的变化。
-                    数据留在本机；完成、复盘、调整，再开下一局。
-                  </>
-                ) : homeMode === "academy" ? (
-                  <>
-                    从剩余雷数和共有区开始，不背脱离棋形的口诀。
-                    每一步都能看到依据，再把正确判断练成直觉。
-                  </>
-                ) : (
-                  <>
-                    同一张确定性棋盘，两名玩家同时开局。没有随机攻击，
-                    没有数值道具——只有判断、节奏和执行。
-                  </>
-                )}
+                {t(homeMode === "solo" ? "home.solo.description" : homeMode === "academy" ? "home.academy.description" : "home.duel.description")}
               </p>
-              <div className="protocol-list" aria-label="原型能力">
+              <div className="protocol-list" aria-label={t("home.capabilities")}>
                 {homeMode === "solo" ? (
                   <>
-                    <span><b>01</b> 初 · 中 · 高 · 自定义</span>
-                    <span><b>02</b> 同规格历史 / PB / 趋势</span>
-                    <span><b>03</b> JSON 导出与本地控制</span>
+                    <span><b>01</b> {t("home.solo.feature1")}</span>
+                    <span><b>02</b> {t("home.solo.feature2")}</span>
+                    <span><b>03</b> {t("home.solo.feature3")}</span>
                   </>
                 ) : homeMode === "academy" ? (
                   <>
-                    <span><b>01</b> 4 章逻辑课程</span>
-                    <span><b>02</b> 分级提示 / 反例</span>
-                    <span><b>03</b> 本地学习进度</span>
+                    <span><b>01</b> {t("home.academy.feature1")}</span>
+                    <span><b>02</b> {t("home.academy.feature2")}</span>
+                    <span><b>03</b> {t("home.academy.feature3")}</span>
                   </>
                 ) : (
                   <>
@@ -1284,12 +1291,12 @@ export function App() {
             </div>
 
             <div className="entry-panel">
-              <div className="panel-kicker">ENTER THE GRID</div>
-              <h2>选择玩法</h2>
+              <div className="panel-kicker">{t("home.enterGrid")}</div>
+              <h2>{t("home.choose")}</h2>
               <div
                 className={`home-mode-switch mode-${homeMode}`}
                 role="group"
-                aria-label="游戏模式"
+                aria-label={t("home.modeLabel")}
               >
                 <button
                   className="home-mode-option"
@@ -1299,8 +1306,8 @@ export function App() {
                   onClick={() => chooseHomeMode("solo")}
                 >
                   <span>01</span>
-                  <strong>单人游戏</strong>
-                  <small>LOCAL</small>
+                  <strong>{t("home.solo")}</strong>
+                  <small>{t("home.local")}</small>
                 </button>
                 <button
                   className="home-mode-option"
@@ -1310,8 +1317,8 @@ export function App() {
                   onClick={() => chooseHomeMode("academy")}
                 >
                   <span>02</span>
-                  <strong>扫雷学院</strong>
-                  <small>LEARN</small>
+                  <strong>{t("home.academy")}</strong>
+                  <small>{t("home.learn")}</small>
                 </button>
                 <button
                   className="home-mode-option"
@@ -1321,7 +1328,7 @@ export function App() {
                   onClick={() => chooseHomeMode("duel")}
                 >
                   <span>03</span>
-                  <strong>1v1 对战</strong>
+                  <strong>{t("home.duel")}</strong>
                   <small>{DUEL_EXPERIMENT_ENABLED ? "REALTIME" : "PAUSED"}</small>
                 </button>
               </div>
@@ -1337,15 +1344,15 @@ export function App() {
                       type="button"
                       onClick={() => enterSolo()}
                     >
-                      单人游戏 · 配置开局
+                      {t("home.solo.enter")}
                     </button>
                     <p className="entry-mode-note">
-                      完成终局后写入版本化本地历史；刷新或重启浏览器后仍可复盘。
+                      {t("home.solo.note")}
                     </p>
-                    <div className="entry-feature-list" aria-label="单人模式能力">
-                      <span>首击 3×3 安全</span>
-                      <span>经典随机 / 无猜</span>
-                      <span>同规格可信趋势</span>
+                    <div className="entry-feature-list" aria-label={t("home.soloCapabilities")}>
+                      <span>{t("home.solo.detail1")}</span>
+                      <span>{t("home.solo.detail2")}</span>
+                      <span>{t("home.solo.detail3")}</span>
                     </div>
                   </>
                 ) : homeMode === "academy" ? (
@@ -1355,39 +1362,39 @@ export function App() {
                       type="button"
                       onClick={enterAcademy}
                     >
-                      扫雷学院 · 开始第一课
+                      {t("home.academy.enter")}
                     </button>
                     <p className="entry-mode-note">
-                      从数字和剩余雷数开始；提示只逐级展开，不会直接替你解题。
+                      {t("home.academy.note")}
                     </p>
-                    <div className="entry-feature-list" aria-label="扫雷学院能力">
-                      <span>无需注册即可学习</span>
-                      <span>Proof 驱动提示</span>
-                      <span>进度保存在本机</span>
+                    <div className="entry-feature-list" aria-label={t("home.academyCapabilities")}>
+                      <span>{t("home.academy.detail1")}</span>
+                      <span>{t("home.academy.detail2")}</span>
+                      <span>{t("home.academy.detail3")}</span>
                     </div>
                   </>
                 ) : !DUEL_EXPERIMENT_ENABLED ? (
                   <>
                     <button className="primary-button" type="button" disabled>
-                      1v1 暂时维护中
+                      {t("home.duel.paused")}
                     </button>
                     <p className="entry-mode-note">
-                      多人游戏仍是产品的一部分；当前环境已通过独立开关暂停实时服务。
+                      {t("home.duel.pausedNote")}
                     </p>
-                    <div className="entry-feature-list" aria-label="1v1 模式状态">
-                      <span>入口保持可见</span>
-                      <span>单人模式不受影响</span>
-                      <span>服务恢复后即可建房</span>
+                    <div className="entry-feature-list" aria-label={t("home.duelStatus")}>
+                      <span>{t("home.duel.detail1")}</span>
+                      <span>{t("home.duel.detail2")}</span>
+                      <span>{t("home.duel.detail3")}</span>
                     </div>
                   </>
                 ) : (
                   <>
                     <label>
-                      <span>PLAYER CALLSIGN</span>
+                      <span>{t("duel.playerCallsign")}</span>
                       <input
                         autoComplete="nickname"
                         maxLength={20}
-                        placeholder="输入昵称"
+                        placeholder={t("duel.nickname")}
                         value={displayName}
                         onChange={(event) => setDisplayName(event.target.value)}
                       />
@@ -1398,12 +1405,12 @@ export function App() {
                       disabled={busy}
                       onClick={() => void enterRoom("create")}
                     >
-                      {busy ? "建立实时通道…" : "创建 1v1 房间"}
+                      {t(busy ? "duel.connecting" : "duel.create")}
                     </button>
-                    <div className="or-divider"><span>或者加入已有房间</span></div>
+                    <div className="or-divider"><span>{t("duel.orJoin")}</span></div>
                     <div className="join-row">
                       <input
-                        aria-label="六位房间码"
+                        aria-label={t("duel.roomCodeAria")}
                         className="code-input"
                         inputMode="text"
                         placeholder="ROOM CODE"
@@ -1419,11 +1426,11 @@ export function App() {
                         disabled={busy || joinCode.length !== 6}
                         onClick={() => void enterRoom("join")}
                       >
-                        加入
+                        {t("duel.join")}
                       </button>
                     </div>
                     <p className="privacy-note">
-                      实验功能可独立关闭；任何 1v1 故障都不阻塞专业单人 Alpha。
+                      {t("duel.privacy")}
                     </p>
                   </>
                 )}
@@ -1434,29 +1441,29 @@ export function App() {
           <section className="match-shell">
             <div className="match-meta">
               <div>
-                <span className="meta-label">ROOM</span>
+                <span className="meta-label">{t("duel.room")}</span>
                 <button
                   className="room-code"
                   type="button"
-                  title="复制房间码"
+                  title={t("duel.copyCode")}
                   onClick={() => {
                     void navigator.clipboard.writeText(roomCode);
-                    setNotice("房间码已复制");
+                    setNotice(t("duel.codeCopied"));
                   }}
                 >
                   {roomCode || "------"}
                 </button>
               </div>
               <div>
-                <span className="meta-label">FORMAT</span>
+                <span className="meta-label">{t("duel.format")}</span>
                 <strong>BO3 · ROUND {round}</strong>
               </div>
               <div>
-                <span className="meta-label">CLOCK</span>
+                <span className="meta-label">{t("duel.clock")}</span>
                 <strong className="race-clock">{formatDuration(elapsed)}</strong>
               </div>
               <div>
-                <span className="meta-label">STATE</span>
+                <span className="meta-label">{t("duel.state")}</span>
                 <strong className={`lead-state lead-${lead.toLowerCase()}`}>{lead}</strong>
               </div>
             </div>
@@ -1465,8 +1472,8 @@ export function App() {
               <div className="lobby-layout">
                 <div className="lobby-main">
                   <p className="eyebrow">PRIVATE DUEL / {roomCode}</p>
-                  <h1>等待两名玩家锁定席位</h1>
-                  <p>分享房间码。双方准备后，服务器统一启动三秒倒计时。</p>
+                  <h1>{t("duel.lobbyTitle")}</h1>
+                  <p>{t("duel.lobbyDescription")}</p>
                   <button
                     className="secondary-button"
                     type="button"
@@ -1474,12 +1481,12 @@ export function App() {
                       void navigator.clipboard
                         .writeText(duelInviteUrl(roomCode))
                         .then(
-                          () => setNotice("邀请链接已复制；打开后会自动预填房间码。"),
-                          () => setError("邀请链接复制失败，请手动分享房间码。"),
+                          () => setNotice(t("duel.inviteCopied")),
+                          () => setError(t("duel.inviteCopyFailed")),
                         );
                     }}
                   >
-                    复制邀请链接
+                    {t("duel.copyInvite")}
                   </button>
                   <div className="seat-grid">
                     {[1, 2].map((seat) => {
@@ -1508,15 +1515,15 @@ export function App() {
                     disabled={!localPlayer || localPlayer.ready}
                     onClick={() => sendAction("READY")}
                   >
-                    {localPlayer?.ready ? "已锁定 · 等待对手" : "准备比赛"}
+                    {t(localPlayer?.ready ? "duel.readyWaiting" : "duel.ready")}
                   </button>
                 </div>
                 <aside className="rules-card">
-                  <span className="panel-kicker">MATCH PROTOCOL</span>
+                  <span className="panel-kicker">{t("duel.matchProtocol")}</span>
                   <ol>
-                    <li><b>同一棋盘</b><span>相同 seed 与安全起点</span></li>
-                    <li><b>触雷判负</b><span>本轮立即进入裁定窗口</span></li>
-                    <li><b>先胜两轮</b><span>平局不计胜局</span></li>
+                    <li><b>{t("duel.ruleSame")}</b><span>{t("duel.ruleSameDetail")}</span></li>
+                    <li><b>{t("duel.ruleMine")}</b><span>{t("duel.ruleMineDetail")}</span></li>
+                    <li><b>{t("duel.ruleBestOfThree")}</b><span>{t("duel.ruleBestOfThreeDetail")}</span></li>
                   </ol>
                 </aside>
               </div>
@@ -1524,9 +1531,9 @@ export function App() {
               <div className="game-layout">
                 <div className="board-stage">
                   <div className="board-toolbar">
-                    <span>左键 REVEAL</span>
-                    <span>右键 FLAG</span>
-                    <span>中键 / 左右键 CHORD</span>
+                    <span>{t("solo.control.reveal")}</span>
+                    <span>{t("solo.control.flag")}</span>
+                    <span>{t("solo.control.chord")}</span>
                     <span>LOCAL {inputLatency === null ? "—" : `${inputLatency.toFixed(1)}ms`}</span>
                   </div>
                   <CanvasBoard
@@ -1545,7 +1552,7 @@ export function App() {
                     <div className="countdown-overlay" aria-live="assertive">
                       <span>ROUND {round}</span>
                       <strong>{countdown ?? 3}</strong>
-                      <small>SYNCHRONIZING BOTH CLIENTS</small>
+                      <small>{t("duel.synchronizing")}</small>
                     </div>
                   )}
                   {(phase === "ROUND_RESULT" || phase === "MATCH_RESULT") && result && (
@@ -1563,11 +1570,11 @@ export function App() {
                       <div className="result-actions">
                         {connectionLost ? (
                           <button className="primary-button" type="button" onClick={leaveRoom}>
-                            返回首页
+                            {t("duel.backHome")}
                           </button>
                         ) : phase === "ROUND_RESULT" ? (
                           <button className="primary-button" type="button" onClick={() => sendAction("READY")}>
-                            准备下一轮
+                            {t("duel.nextRound")}
                           </button>
                         ) : (
                           <button
@@ -1576,12 +1583,12 @@ export function App() {
                             disabled={localPlayer?.rematch === true}
                             onClick={() => sendAction("REMATCH")}
                           >
-                            {localPlayer?.rematch ? "已确认 · 等待对手" : "立即重赛"}
+                            {t(localPlayer?.rematch ? "duel.rematchWaiting" : "duel.rematch")}
                           </button>
                         )}
                         {replayId && (
                           <a className="secondary-button button-link" download href={replayUrl(replayId)}>
-                            下载回放 JSON
+                            {t("duel.downloadReplay")}
                           </a>
                         )}
                       </div>
@@ -1590,8 +1597,8 @@ export function App() {
                 </div>
 
                 <aside className="race-panel">
-                  <span className="panel-kicker">LIVE RACE TELEMETRY</span>
-                  {players.length === 0 && <p className="muted">等待比赛遥测…</p>}
+                  <span className="panel-kicker">{t("duel.liveTelemetry")}</span>
+                  {players.length === 0 && <p className="muted">{t("duel.waitingTelemetry")}</p>}
                   {players.map((player) => (
                     <div
                       className={`racer${player.playerId === playerId ? " is-local" : ""}`}
@@ -1624,7 +1631,7 @@ export function App() {
                     ]}
                   />
                   <div className="integrity-note">
-                    <span>AUTHORITATIVE HASH</span>
+                    <span>{t("duel.authoritativeHash")}</span>
                     <code>{authoritativeHash.slice(0, 12) || "------------"}</code>
                   </div>
                 </aside>
@@ -1632,6 +1639,7 @@ export function App() {
             )}
           </section>
         )}
+        </Suspense>
       </main>
 
       {(error || notice) && (
@@ -1639,7 +1647,7 @@ export function App() {
           <span>{error || notice}</span>
           <button
             type="button"
-            aria-label="关闭通知"
+            aria-label={t("duel.closeNotice")}
             onClick={() => {
               setError("");
               setNotice("");
@@ -1650,10 +1658,6 @@ export function App() {
         </div>
       )}
 
-      <footer>
-        <span>PHASE 0.5 / EXPERIENCE &amp; LEARNING BUILD</span>
-        <span>NO ITEMS · NO RANDOM ATTACKS · NO PAY TO WIN</span>
-      </footer>
     </div>
   );
 }

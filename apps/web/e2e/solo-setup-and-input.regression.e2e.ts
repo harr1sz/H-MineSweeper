@@ -60,8 +60,8 @@ test("solo uses a configuration gateway before rendering the board", async ({
   await expect(page.locator('canvas[role="grid"]')).toHaveCount(0);
   await page.getByRole("button", { name: /高级 30×16/ }).click();
   await page.getByRole("button", { name: "无猜模式" }).click();
-  await page.getByRole("button", { name: "分析" }).click();
-  await page.getByRole("button", { name: "专业" }).click();
+  await page.getByRole("button", { name: "详细数据" }).click();
+  await page.getByRole("button", { name: "专业", exact: true }).click();
   await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
 
   await expect(page.locator('canvas[role="grid"]')).toBeVisible();
@@ -69,7 +69,7 @@ test("solo uses a configuration gateway before rendering the board", async ({
     page.getByRole("heading", { name: "配置单人训练" }),
   ).toHaveCount(0);
   await expect(page.getByText("高级 · 30×16 / 99 · 无猜模式")).toBeVisible();
-  await expect(page.getByText(/双击 CHORD/)).toBeVisible();
+  await expect(page.getByText(/双击数字：快速展开/)).toBeVisible();
   await expect(page.getByText("物理点击")).toBeVisible();
 });
 
@@ -77,7 +77,7 @@ test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", as
   page,
 }) => {
   await openSoloSetup(page);
-  await page.getByRole("button", { name: "分析" }).click();
+  await page.getByRole("button", { name: "详细数据" }).click();
   await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
 
   const width = 9;
@@ -184,7 +184,7 @@ test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", as
     position: cellPosition(chordIndex, width, canvasWidth),
   });
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
-  await expect(page.getByText(/揭格 \/ 和弦/).locator(".."))
+  await expect(page.getByText(/揭格 \/ 快速展开/).locator(".."))
     .toContainText("/ 1");
 
   const mineIndex = Array.from(expected.board.mines).findIndex(
