@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { translate } from "../src/i18n";
 
 const PUBLIC_TELEMETRY_SESSION = {
   sessionId: "public-session-1234567890",
@@ -165,9 +166,9 @@ test("公开 Alpha 无邀请码门槛，退出遥测不阻塞单人入口", asyn
   });
 
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: /每一局.*都成为下一局的依据/ }),
-  ).toBeVisible();
+  await expect(page.locator(".hero-mode-copy h1")).toHaveText(
+    translate("zh-CN", "home.solo.title"),
+  );
   await expect(page.getByLabel("邀请码")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "进入 Alpha" })).toHaveCount(0);
   await expect(
