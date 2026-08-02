@@ -111,6 +111,10 @@ const PARTIAL_SAFE_RULES = new Set<VisibleBoardProof["rule"]>([
   "SUBSET_MINE",
 ]);
 
+const DIRECT_AUTO_MARK_RULES = new Set<VisibleBoardProof["rule"]>([
+  "SINGLE_MINE",
+]);
+
 function compareNumberArrays(left: readonly number[], right: readonly number[]): number {
   const sharedLength = Math.min(left.length, right.length);
   for (let index = 0; index < sharedLength; index += 1) {
@@ -295,16 +299,28 @@ export function parseCoachSuggestion(value: unknown): CoachSuggestion | null {
 }
 
 function parseVisibleBoardState(value: unknown): VisibleBoardState | null {
-  if (!isRecord(value) || !hasExactKeys(value, [
+  if (!isRecord(value)) {
+    return null;
+  }
+  const allowedKeys = new Set([
     "clues",
     "height",
     "playerClaims",
+    "provenMines",
     "totalMines",
     "width",
-  ])) {
+  ]);
+  if (
+    Object.keys(value).some((key) => !allowedKeys.has(key)) ||
+    !hasExactKeys(
+      Object.fromEntries(Object.entries(value).filter(([key]) => key !== "provenMines")),
+      ["clues", "height", "playerClaims", "totalMines", "width"],
+    )
+  ) {
     return null;
   }
   const { width, height, totalMines, clues, playerClaims } = value;
+  const provenMines = value.provenMines ?? [];
   if (
     !Number.isSafeInteger(width) ||
     !Number.isSafeInteger(height) ||
@@ -313,7 +329,8 @@ function parseVisibleBoardState(value: unknown): VisibleBoardState | null {
     (height as number) <= 0 ||
     (totalMines as number) < 0 ||
     !isSafeIntegerArray(clues) ||
-    !isSafeIntegerArray(playerClaims)
+    !isSafeIntegerArray(playerClaims) ||
+    !isSafeIntegerArray(provenMines)
   ) {
     return null;
   }
@@ -324,17 +341,22 @@ function parseVisibleBoardState(value: unknown): VisibleBoardState | null {
     (totalMines as number) > cellCount ||
     clues.some((clue) => clue < -1 || clue > 8) ||
     playerClaims.some((index) => index < 0 || index >= cellCount || clues[index] !== -1) ||
-    new Set(playerClaims).size !== playerClaims.length
+    new Set(playerClaims).size !== playerClaims.length ||
+    new Set(provenMines).size !== provenMines.length ||
+    provenMines.some((index) => !playerClaims.includes(index))
   ) {
     return null;
   }
-  return {
+  const parsed: VisibleBoardState = {
     width: width as number,
     height: height as number,
     totalMines: totalMines as number,
     clues: [...clues],
     playerClaims: [...playerClaims].sort((left, right) => left - right),
   };
+  return provenMines.length > 0
+    ? { ...parsed, provenMines: [...provenMines].sort((left, right) => left - right) }
+    : parsed;
 }
 
 /**
@@ -368,7 +390,10 @@ export function createCoachRequest(
  * hidden clue values. Terminal states are rejected because a detonated cell is
  * not a live clue.
  */
-export function visibleBoardStateForPractice(state: GameState): VisibleBoardState {
+export function visibleBoardStateForPractice(
+  state: GameState,
+  provenMines: ReadonlySet<number> = new Set(),
+): VisibleBoardState {
   if (state.outcome !== "PLAYING") {
     throw new TypeError("Practice analysis requires a playing game state");
   }
@@ -378,12 +403,16 @@ export function visibleBoardStateForPractice(state: GameState): VisibleBoardStat
   const playerClaims = Array.from(state.visibility, (visibility, index) =>
     visibility === CELL_FLAGGED ? index : -1,
   ).filter((index) => index >= 0);
+  const activeProvenMines = [...provenMines]
+    .filter((index) => playerClaims.includes(index))
+    .sort((left, right) => left - right);
   return {
     width: state.board.spec.width,
     height: state.board.spec.height,
     totalMines: state.board.spec.mines,
     clues,
     playerClaims,
+    ...(activeProvenMines.length > 0 ? { provenMines: activeProvenMines } : {}),
   };
 }
 
@@ -659,6 +688,38 @@ export function coachMineActionsForApplication(
   return candidates.map(({ cellIndex, proof }) => ({ cellIndex, proof }));
 }
 
+/**
+ * Automatic marking is deliberately narrower than coach guidance. Local
+ * SINGLE proofs are immediate enough for automatic teaching feedback.
+ * SUBSET, GLOBAL, and CSP conclusions remain available as hints, but are not
+ * inserted automatically before the player exposes the intermediate clue.
+ */
+export function coachMineActionsForAutoMark(
+  suggestion: CoachSuggestion,
+  currentVisibleState: VisibleBoardState,
+): readonly CoachMineAction[] {
+  // Return every conclusion that is already direct in this immutable visible
+  // snapshot. The caller may apply the whole batch, but must not feed those
+  // new flags back into the solver until the player reveals new information.
+  return coachMineActionsForApplication(suggestion, currentVisibleState)
+    .filter(({ proof }) => DIRECT_AUTO_MARK_RULES.has(proof.rule));
+}
+
+/** Removes stale coach markers that no longer correspond to a real flag. */
+export function activeAutoFlaggedIndexes(
+  indexes: ReadonlySet<number>,
+  visibility: ArrayLike<number>,
+): readonly number[] {
+  return [...indexes]
+    .filter((index) =>
+      Number.isSafeInteger(index) &&
+      index >= 0 &&
+      index < visibility.length &&
+      visibility[index] === CELL_FLAGGED
+    )
+    .sort((left, right) => left - right);
+}
+
 /** Returns whether the worker proved this exact player action before it ran. */
 export function isCoachActionProven(
   suggestion: CoachSuggestion,
@@ -756,34 +817,45 @@ export function coachMineActionForApplicationStep(
   stepIndex: number,
 ): CoachMineAction | null {
   if (!Number.isSafeInteger(stepIndex) || stepIndex < 0) return null;
-  const batch = coachMineActionsForApplication(suggestion, initialVisibleState);
+  const batch = coachMineActionsForAutoMark(suggestion, initialVisibleState);
   const action = batch[stepIndex];
   if (!action || !hasSameVisibleGeometry(initialVisibleState, currentVisibleState)) {
     return null;
   }
   const expectedClaims = new Set(initialVisibleState.playerClaims);
+  const expectedProvenMines = new Set(initialVisibleState.provenMines ?? []);
   for (let index = 0; index < stepIndex; index += 1) {
     const applied = batch[index];
     if (!applied) return null;
     expectedClaims.add(applied.cellIndex);
+    expectedProvenMines.add(applied.cellIndex);
   }
   const actualClaims = [...currentVisibleState.playerClaims]
     .sort((left, right) => left - right);
   const expectedClaimIndexes = [...expectedClaims].sort((left, right) => left - right);
+  const actualProvenMines = [...(currentVisibleState.provenMines ?? [])]
+    .sort((left, right) => left - right);
+  const expectedProvenMineIndexes = [...expectedProvenMines]
+    .sort((left, right) => left - right);
   if (
     new Set(actualClaims).size !== actualClaims.length ||
     compareNumberArrays(actualClaims, expectedClaimIndexes) !== 0 ||
+    compareNumberArrays(actualProvenMines, expectedProvenMineIndexes) !== 0 ||
     currentVisibleState.clues[action.cellIndex] !== -1 ||
     expectedClaims.has(action.cellIndex)
   ) {
     return null;
   }
+  const supportedProof = analyzeVisibleBoard(currentVisibleState, 1).proofs.find(
+    (proof) =>
+      proof.kind === "MINE" &&
+      DIRECT_AUTO_MARK_RULES.has(proof.rule) &&
+      proof.targets.includes(action.cellIndex),
+  );
+  if (!supportedProof) return null;
   return {
     cellIndex: action.cellIndex,
-    proof: {
-      ...action.proof,
-      stateHash: hashVisibleBoardState(currentVisibleState),
-    },
+    proof: supportedProof,
   };
 }
 

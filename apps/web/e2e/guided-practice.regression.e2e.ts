@@ -6,6 +6,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  coachMineActionsForAutoMark,
   createCoachRequest,
   runCoachRequest,
   visibleBoardStateForPractice,
@@ -134,8 +135,10 @@ async function useDeterministicPracticeEnvironment(
 
 async function enterClassicGuidedPractice(page: Page): Promise<void> {
   await page.goto("/");
-  await page.getByRole("button", { name: "引导练习" }).click();
+  await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "引导练习" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -167,6 +170,16 @@ function provenMineTargetsAfterProofReveal(): readonly number[] {
   );
 }
 
+function directAutoMineTargetsAfterProofReveal(): readonly number[] {
+  const state = createGameState(fixedBoard());
+  revealCell(state, FIRST_INDEX);
+  revealCell(state, PROOF_REVEAL_INDEX);
+  const visibleState = visibleBoardStateForPractice(state);
+  const suggestion = runCoachRequest(createCoachRequest(1, visibleState));
+  return coachMineActionsForAutoMark(suggestion, visibleState)
+    .map(({ cellIndex }) => cellIndex);
+}
+
 async function clickBoardCell(
   page: Page,
   index: number,
@@ -189,9 +202,48 @@ function remainingMines(page: Page) {
   return page.locator(".solo-stats > div").filter({ hasText: "剩余雷数" }).locator("strong");
 }
 
+async function autoFlagGlyphPixelCounts(
+  page: Page,
+  indexes: readonly number[],
+): Promise<readonly number[]> {
+  return page.locator("canvas.mine-board").evaluate((canvas, targetIndexes) => {
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("棋盘 Canvas 不可读取");
+    const columns = 9;
+    const rows = 9;
+    const cellWidth = canvas.width / columns;
+    const cellHeight = canvas.height / rows;
+    return targetIndexes.map((index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const image = context.getImageData(
+        Math.floor(column * cellWidth),
+        Math.floor(row * cellHeight),
+        Math.ceil(cellWidth),
+        Math.ceil(cellHeight),
+      );
+      let focusPixels = 0;
+      for (let offset = 0; offset < image.data.length; offset += 4) {
+        if (
+          Math.abs((image.data[offset] ?? 0) - 255) <= 2 &&
+          Math.abs((image.data[offset + 1] ?? 0) - 217) <= 2 &&
+          Math.abs((image.data[offset + 2] ?? 0) - 137) <= 2 &&
+          (image.data[offset + 3] ?? 0) > 0
+        ) {
+          focusPixels += 1;
+        }
+      }
+      return focusPixels;
+    });
+  }, indexes);
+}
+
 async function expectPracticeSaved(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
   await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "练习历史" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "查看最终棋盘" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "返回首页" })).toBeVisible();
 }
 
 async function readOnlyPracticeReplays(page: Page): Promise<readonly PracticeReplayV1[]> {
@@ -288,8 +340,10 @@ test("guided practice stays fully localized through setup, coaching, result, his
   await useDeterministicPracticeEnvironment(page);
   await page.goto("/");
   await page.getByRole("button", { name: "切换到英文" }).click();
-  await page.getByRole("button", { name: "Guided practice" }).click();
+  await expect(page.getByRole("button", { name: "Guided practice" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Set up a solo game" }).click();
   await expect(page.getByRole("heading", { name: "Set up a solo game" })).toBeVisible();
+  await page.getByRole("button", { name: "Guided practice" }).click();
   await expect(page.getByRole("button", { name: "Guided practice" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -318,10 +372,22 @@ test("guided practice stays fully localized through setup, coaching, result, his
   await clickBoardCell(page, mineIndex);
   await expect(page.getByRole("heading", { name: "Mine hit" })).toBeVisible();
   await expect(page.getByText(/practice record and replay were saved/u)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Practice history" })).toBeVisible();
-  await page.getByRole("link", { name: "Review this game" }).click();
+  await expect(page.getByRole("heading", { name: "Practice history" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Review final board" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to home" })).toBeVisible();
+  await page.getByRole("button", { name: "Review final board" }).click();
+  await expect(page.locator("#solo-board")).toBeFocused();
+  await page.getByRole("link", { name: "Review this practice game" }).click();
   await expect(page.getByRole("heading", { name: "Practice game review" })).toBeVisible();
   await expect(page.getByText(/\d+ practice events? checked/u)).toBeVisible();
+  const nextStep = page.getByRole("button", { name: "Next step" });
+  while (await nextStep.isEnabled()) await nextStep.click();
+  await page.getByRole("button", { name: "Show final board" }).click();
+  const replayBoard = page.getByRole("img", { name: /replay board/iu });
+  await expect(replayBoard).toHaveAttribute("data-terminal-mine-count", "10");
+  await expect.poll(async () => Number(
+    await replayBoard.getAttribute("data-revealed-cell-count"),
+  )).toBeGreaterThan(0);
   await expect.poll(() => page.locator(".practice-replay-shell").innerText())
     .not.toMatch(/[\u3400-\u9fff]/u);
 });
@@ -351,8 +417,10 @@ test("guided practice stays score-isolated and saves a verified practice replay"
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "引导练习" }).click();
+  await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "引导练习" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -385,8 +453,10 @@ test("guided practice stays score-isolated and saves a verified practice replay"
 
   await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
   await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "练习历史" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /历史|趋势/u })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "练习历史" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "查看本局复盘" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "查看最终棋盘" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "返回首页" })).toBeVisible();
   await expect(page.getByText(/新 PB|当前规则最佳/u)).toHaveCount(0);
 
   const counts = await page.evaluate(async () => {
@@ -417,7 +487,7 @@ test("guided practice stays score-isolated and saves a verified practice replay"
     practiceReplays: 1,
   });
 
-  await page.getByRole("link", { name: "分析本局" }).click();
+  await page.getByRole("link", { name: "查看本局复盘" }).click();
   await expect(page.getByRole("heading", { name: "练习局复盘" })).toBeVisible();
   await expect(page.getByText(/已验证 \d+ 个练习事件/u)).toBeVisible();
 });
@@ -446,7 +516,7 @@ test("a practice terminal leaves existing standard history, PB, trend input, and
     }));
   });
 
-  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await page.locator(".solo-setup-section")
     .filter({ hasText: "生成规则" })
     .getByRole("button", { name: "经典模式" })
@@ -463,6 +533,8 @@ test("a practice terminal leaves existing standard history, PB, trend input, and
   const beforePractice = await readStandardScoreState(page);
 
   await page.getByRole("button", { name: "返回首页" }).click();
+  await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await page.getByRole("button", { name: "引导练习" }).click();
   await page.locator(".solo-setup-section")
     .filter({ hasText: "生成规则" })
@@ -488,6 +560,8 @@ test("practice history clears and imports both stores atomically without hiding 
   await clickBoardCell(page, FIRST_INDEX);
   await clickBoardCell(page, fixedBoard().mines.findIndex((value) => value === 1));
   await expectPracticeSaved(page);
+  await page.getByRole("button", { name: "查看练习历史" }).click();
+  await expect(page.getByRole("heading", { name: "练习历史" })).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出练习 JSON" }).click();
@@ -659,6 +733,36 @@ test("示范下一步只执行一个有证明的教练动作", async ({ page }) 
   });
 });
 
+test("立即提示和示范会利用教练已证明的旗帜寻找安全格", async ({ page }) => {
+  await useDeterministicPracticeEnvironment(page);
+  await enterClassicGuidedPractice(page);
+
+  await clickBoardCell(page, FIRST_INDEX);
+  await clickBoardCell(page, PROOF_REVEAL_INDEX);
+  await page.getByRole("checkbox", { name: /自动标雷/u }).check();
+  await expect(remainingMines(page)).toHaveText("8");
+
+  await page.getByRole("button", { name: "立即提示" }).click();
+  await expect(page.locator(".practice-coach-message")).toContainText("揭开第 2 行第 7 列");
+  await page.getByRole("button", { name: "示范下一步" }).click();
+
+  const autoTargets = new Set(directAutoMineTargetsAfterProofReveal());
+  const terminalMine = fixedBoard().mines.findIndex(
+    (value, index) => value === 1 && !autoTargets.has(index),
+  );
+  await clickBoardCell(page, terminalMine);
+  await expectPracticeSaved(page);
+
+  const replay = (await readOnlyPracticeReplays(page))[0]!;
+  expect(replay.events).toContainEqual(expect.objectContaining({
+    eventType: "COACH_ACTION",
+    trigger: "DEMONSTRATE",
+    action: "REVEAL",
+    cellIndex: 15,
+    proof: expect.objectContaining({ rule: "SINGLE_SAFE", kind: "SAFE" }),
+  }));
+});
+
 test("玩家快于当前 Worker 时，教练仍按操作前可见局面回填证明反馈", async ({ page }) => {
   await useDeterministicPracticeEnvironment(page, { stallCoachWorkerNumber: 2 });
   await enterClassicGuidedPractice(page);
@@ -680,12 +784,13 @@ test("玩家快于当前 Worker 时，教练仍按操作前可见局面回填证
   ).__HMS_E2E_COACH_WORKER_STATE__?.coachStarts ?? 0)).toBeGreaterThanOrEqual(3);
 });
 
-test("自动标雷标出全部可证明雷且尊重玩家取消直到出现新数字", async ({ page }) => {
+test("自动标雷只执行单数字证明且尊重玩家取消直到出现新数字", async ({ page }) => {
   await useDeterministicPracticeEnvironment(page);
   await enterClassicGuidedPractice(page);
 
-  const expectedMineTargets = provenMineTargetsAfterProofReveal();
-  expect(expectedMineTargets).toEqual([44, 24, 6, 21]);
+  const expectedMineTargets = directAutoMineTargetsAfterProofReveal();
+  expect(expectedMineTargets).toEqual([44, 24]);
+  const deferredInferenceTargets = [6, 21];
   const suppressedTarget = expectedMineTargets[0]!;
 
   await clickBoardCell(page, FIRST_INDEX);
@@ -694,15 +799,19 @@ test("自动标雷标出全部可证明雷且尊重玩家取消直到出现新�
     "如果棋盘保持不变",
   );
   await page.getByRole("checkbox", { name: /自动标雷/u }).check();
-  await expect(remainingMines(page)).toHaveText("6");
+  await expect(remainingMines(page)).toHaveText("8");
+  await expect(page.locator(".practice-coach-proof")).toBeVisible();
+  await expect.poll(async () => (
+    await autoFlagGlyphPixelCounts(page, expectedMineTargets)
+  ).every((count) => count >= 8)).toBe(true);
 
   await clickBoardCell(page, suppressedTarget, "right");
-  await expect(remainingMines(page)).toHaveText("7");
+  await expect(remainingMines(page)).toHaveText("9");
   await page.waitForTimeout(1_500);
-  await expect(remainingMines(page)).toHaveText("7");
+  await expect(remainingMines(page)).toHaveText("9");
 
   await clickBoardCell(page, SAFE_STATE_CHANGE_INDEX);
-  await expect(remainingMines(page)).toHaveText("6");
+  await expect(remainingMines(page)).toHaveText("8");
 
   const terminalMine = fixedBoard().mines.findIndex((value) => value === 1);
   await clickBoardCell(page, terminalMine);
@@ -738,6 +847,9 @@ test("自动标雷标出全部可证明雷且尊重玩家取消直到出现新�
     .slice(proofRevealPosition + 1, unflagPosition)
     .filter((event) => event.eventType === "COACH_ACTION" && event.trigger === "AUTO_MARK");
   expect(initialAutoFlags.map(({ cellIndex }) => cellIndex)).toEqual(expectedMineTargets);
+  expect(initialAutoFlags.some(
+    ({ cellIndex }) => deferredInferenceTargets.includes(cellIndex),
+  )).toBe(false);
   expect(initialAutoFlags.every(
     (event) => event.action === "FLAG" && event.physicalClicks === 0,
   )).toBe(true);

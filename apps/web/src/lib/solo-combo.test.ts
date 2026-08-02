@@ -3,6 +3,7 @@ import {
   createSoloComboState,
   getSoloComboDeadlineMs,
   getSoloComboRemainingMs,
+  getSoloComboFeedbackKey,
   getSoloComboTier,
   isSoloComboExpired,
   reduceSoloCombo,
@@ -39,7 +40,7 @@ describe("solo safe streak", () => {
     },
   );
 
-  it("clears when a player's reveal is rejected", () => {
+  it("keeps a rejected repeat reveal neutral", () => {
     const active = reduceSoloCombo(createSoloComboState(), {
       type: "ACTION",
       actor: "PLAYER",
@@ -50,7 +51,7 @@ describe("solo safe streak", () => {
       atMs: 1_000,
     });
 
-    const cleared = reduceSoloCombo(active, {
+    const unchanged = reduceSoloCombo(active, {
       type: "ACTION",
       actor: "PLAYER",
       action: "REVEAL",
@@ -60,7 +61,7 @@ describe("solo safe streak", () => {
       atMs: 1_200,
     });
 
-    expect(cleared).toEqual(createSoloComboState());
+    expect(unchanged).toBe(active);
   });
 
   it.each(["NEW_GAME", "EXIT_BOARD", "PAGE_HIDDEN"] as const)(
@@ -78,6 +79,16 @@ describe("solo safe streak", () => {
     expect([0, 1, 2, 3, 4, 7, 8, 11, 12, 99].map(getSoloComboTier)).toEqual([
       0, 0, 2, 2, 4, 4, 8, 8, 12, 12,
     ]);
+  });
+
+  it("varies high-streak feedback instead of repeating one line", () => {
+    const feedback = Array.from({ length: 12 }, (_, offset) =>
+      getSoloComboFeedbackKey(12 + offset)
+    );
+
+    expect(new Set(feedback).size).toBeGreaterThanOrEqual(8);
+    expect(feedback[0]).not.toBe(feedback[1]);
+    expect(feedback[1]).not.toBe(feedback[2]);
   });
 
   it("restarts at one when the next safe action lands after 3 seconds", () => {
@@ -188,9 +199,8 @@ describe("solo safe streak", () => {
     ["REVEAL", true, 0, false],
     ["CHORD", true, 0, false],
     ["CHORD", false, 0, false],
-    ["REVEAL", true, 3, true],
   ] as const)(
-    "clears after an invalid or mined %s action",
+    "keeps a zero-result or rejected %s action neutral",
     (action, accepted, safeCellsRevealed, hitMine) => {
       expect(
         reduceSoloCombo(
@@ -205,9 +215,59 @@ describe("solo safe streak", () => {
             atMs: 2_100,
           },
         ),
-      ).toEqual(createSoloComboState());
+      ).toEqual({ count: 8, lastIncrementAtMs: 2_000 });
     },
   );
+
+  it("clears only when a reveal actually hits a mine", () => {
+    expect(reduceSoloCombo(
+      { count: 8, lastIncrementAtMs: 2_000 },
+      {
+        type: "ACTION",
+        actor: "PLAYER",
+        action: "REVEAL",
+        accepted: true,
+        safeCellsRevealed: 3,
+        hitMine: true,
+        atMs: 2_100,
+      },
+    )).toEqual(createSoloComboState());
+  });
+
+  it("continues after redundant double-click events when the next safe reveal is in time", () => {
+    const active = { count: 2, lastIncrementAtMs: 1_000 };
+    const afterFirstClick = reduceSoloCombo(active, {
+      type: "ACTION",
+      actor: "PLAYER",
+      action: "REVEAL",
+      accepted: false,
+      safeCellsRevealed: 0,
+      hitMine: false,
+      atMs: 1_200,
+    });
+    const afterSecondClick = reduceSoloCombo(afterFirstClick, {
+      type: "ACTION",
+      actor: "PLAYER",
+      action: "CHORD",
+      accepted: true,
+      safeCellsRevealed: 0,
+      hitMine: false,
+      atMs: 1_250,
+    });
+    const continued = reduceSoloCombo(afterSecondClick, {
+      type: "ACTION",
+      actor: "PLAYER",
+      action: "REVEAL",
+      accepted: true,
+      safeCellsRevealed: 1,
+      hitMine: false,
+      atMs: 2_000,
+    });
+
+    expect(afterFirstClick).toBe(active);
+    expect(afterSecondClick).toBe(active);
+    expect(continued).toEqual({ count: 3, lastIncrementAtMs: 2_000 });
+  });
 
   it("keeps the numeric streak unbounded", () => {
     expect(

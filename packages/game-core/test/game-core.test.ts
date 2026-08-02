@@ -688,6 +688,37 @@ describe("visible-board replay solver", () => {
     expect(partial.searchedNodes).toBe(1);
   });
 
+  it("uses only explicitly proven flagged mines as local constraint facts", () => {
+    const base = {
+      width: 3,
+      height: 1,
+      totalMines: 1,
+      clues: [-1, 1, -1],
+      playerClaims: [0],
+    };
+    const unprovenFlag = analyzeVisibleBoard(base, 1);
+    const provenFlag = analyzeVisibleBoard({ ...base, provenMines: [0] }, 1);
+
+    expect(unprovenFlag).toMatchObject({ status: "PARTIAL", proofs: [] });
+    expect(provenFlag.status).toBe("COMPLETE");
+    expect(provenFlag.proofs).toContainEqual(expect.objectContaining({
+      rule: "SINGLE_SAFE",
+      kind: "SAFE",
+      targets: [2],
+    }));
+  });
+
+  it("rejects a proven mine that is not still present as a player claim", () => {
+    expect(analyzeVisibleBoard({
+      width: 3,
+      height: 1,
+      totalMines: 1,
+      clues: [-1, 1, -1],
+      playerClaims: [],
+      provenMines: [0],
+    })).toMatchObject({ status: "CONTRADICTION", proofs: [] });
+  });
+
   it("solves a 2-3-2 frontier without requiring the player to flag known mines", () => {
     const analysis = analyzeVisibleBoard({
       width: 5,

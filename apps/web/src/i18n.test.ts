@@ -49,19 +49,22 @@ describe("locale contract", () => {
     expect(translate("en-US", "academy.freePractice")).toBe("Skill drills");
     expect(translate("en-US", "academy.coach")).toBe("Coach mode");
     expect(translate("en-US", "academy.coach")).not.toBe(
-      translate("en-US", "home.solo.practice"),
+      translate("en-US", "practice.setup.guided"),
     );
     expect(translate("en-US", "academy.h7")).not.toMatch(/\bH7\b/u);
   });
 
   it("keeps guided-practice copy bilingual and honest about visible information", () => {
-    expect(translate("zh-CN", "home.solo.practice")).toBe("引导练习");
-    expect(translate("en-US", "home.solo.practice")).toBe("Guided practice");
+    expect(translate("zh-CN", "practice.setup.guided")).toBe("引导练习");
+    expect(translate("en-US", "practice.setup.guided")).toBe("Guided practice");
     expect(translate("en-US", "practice.setup.classicWarning")).toContain(
       "will not use hidden mine locations",
     );
     expect(translate("en-US", "practice.coach.autoMarkHelp")).toContain(
-      "never reveals a cell automatically",
+      "directly determined by one visible clue",
+    );
+    expect(translate("en-US", "practice.coach.autoMarkHelp")).toContain(
+      "Comparisons between clues remain hints",
     );
     expect(translate("en-US", "practice.feedback.safeUnproven")).toContain(
       "did not determine this move",
@@ -72,6 +75,18 @@ describe("locale contract", () => {
     expect(translate("en-US", "practice.coach.idleCountdown", { seconds: 2 })).toContain(
       "2 seconds",
     );
+  });
+
+  it("uses plain Chinese on the home page", () => {
+    expect(translate("zh-CN", "home.solo.enter")).toBe("开始单人游戏");
+    expect(translate("zh-CN", "home.solo.description")).toBe(
+      "成绩和复盘都保存在这台设备上。你可以比较相同难度下的速度、效率和失误，再开始下一局。",
+    );
+    expect(translate("zh-CN", "home.solo.detail1")).toBe(
+      "初级 / 中级 / 高级 / 自定义",
+    );
+    expect(translate("zh-CN", "home.solo.detail2")).toBe("经典随机 / 无猜");
+    expect(translate("zh-CN", "home.solo.detail3")).toBe("标准对局 / 引导练习");
   });
 
   it("does not use em dashes, en dashes, or Chinese sentence punctuation in English messages", () => {

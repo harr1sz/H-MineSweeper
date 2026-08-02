@@ -47,6 +47,8 @@ test("IndexedDB v3 data survives the v4 practice-store upgrade", async ({ page }
   await page.unroute("**/src/main.tsx");
   await page.reload();
   await expect(page.getByRole("heading", { name: "选择玩法" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await page.getByRole("button", { name: "引导练习" }).click();
   await page.getByRole("button", { name: "开始对局" }).click();
   await expect(page.getByRole("heading", { name: "练习历史" })).toBeVisible();

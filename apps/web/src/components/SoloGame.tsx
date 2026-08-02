@@ -48,6 +48,7 @@ import {
   SOLO_COMBO_WINDOW_MS,
   createSoloComboState,
   getSoloComboDeadlineMs,
+  getSoloComboFeedbackKey,
   getSoloComboTier,
   reduceSoloCombo,
   type SoloComboActor,
@@ -81,8 +82,9 @@ import {
 } from "../lib/solo-preferences";
 import { percentile } from "../lib/performance";
 import {
+  activeAutoFlaggedIndexes,
+  coachMineActionForApplicationStep,
   createCoachRequest,
-  coachMineActionsForApplication,
   isCoachActionProven,
   isCoachChordProven,
   isCoachSuggestionApplicable,
@@ -453,6 +455,9 @@ export function SoloGame({
   const practiceLastInteractionAtRef = useRef<number | null>(null);
   const practiceShownStateHashesRef = useRef(new Set<string>());
   const practiceSuppressedAutoFlagsRef = useRef(new Set<number>());
+  const practiceAutoMarkEvidenceHashRef = useRef<string | null>(null);
+  const practiceAutoMarkExplanationRef = useRef(false);
+  const autoFlaggedIndexesRef = useRef(new Set<number>());
   const practiceEventsRef = useRef<PracticeReplayEventV1[]>([]);
   const practiceEventsOverflowRef = useRef(false);
   const practiceStartedAtRef = useRef<number | null>(null);
@@ -508,6 +513,7 @@ export function SoloGame({
   const [practiceSaveState, setPracticeSaveState] =
     useState<PracticeSaveState>("IDLE");
   const [practiceHistoryRefresh, setPracticeHistoryRefresh] = useState(0);
+  const [showPracticeHistory, setShowPracticeHistory] = useState(true);
   const [statsLevel, setStatsLevel] = useState<StatsLevel>(
     launchPreferences.statsLevel,
   );
@@ -766,6 +772,9 @@ export function SoloGame({
       practiceLastInteractionAtRef.current = null;
       practiceShownStateHashesRef.current.clear();
       practiceSuppressedAutoFlagsRef.current.clear();
+      practiceAutoMarkEvidenceHashRef.current = null;
+      practiceAutoMarkExplanationRef.current = false;
+      autoFlaggedIndexesRef.current.clear();
       autoMarkMinesRef.current = false;
       initialFlagsRef.current = [];
       boardSpecRef.current = null;
@@ -787,6 +796,7 @@ export function SoloGame({
       setAutoMarkMines(false);
       setAutoFlaggedIndexes(new Set());
       setPracticeSaveState("IDLE");
+      setShowPracticeHistory(true);
       setLegacyPersonalBestMs(null);
       setCurrentRulesPersonalBestMs(null);
       setIsNewPersonalBest(false);
@@ -830,6 +840,9 @@ export function SoloGame({
       lastEffectiveInteractionAtRef.current = null;
       runEffectiveInteractionMsRef.current =
         effectiveInteractionAccumulatedMsRef.current;
+      if (sessionKind === "GUIDED_PRACTICE") {
+        setShowPracticeHistory(false);
+      }
       setStatus(next.outcome === "WON" ? "WON" : "LOST");
       setNotice({
         id: next.outcome === "WON"
@@ -837,7 +850,7 @@ export function SoloGame({
           : "solo.lostNotice",
       });
     },
-    [cancelCoachFeedbackAnalysis],
+    [cancelCoachFeedbackAnalysis, sessionKind],
   );
 
   const recordAction = useCallback(
@@ -886,11 +899,15 @@ export function SoloGame({
         );
         if (delta.revealed.some(({ value }) => value >= 0)) {
           practiceSuppressedAutoFlagsRef.current.clear();
+          practiceAutoMarkEvidenceHashRef.current = null;
         }
         if (delta.flagged?.flagged === false) {
+          if (autoFlaggedIndexesRef.current.has(originIndex)) {
+            practiceSuppressedAutoFlagsRef.current.add(originIndex);
+            autoFlaggedIndexesRef.current.delete(originIndex);
+          }
           setAutoFlaggedIndexes((current) => {
             if (!current.has(originIndex)) return current;
-            practiceSuppressedAutoFlagsRef.current.add(originIndex);
             const next = new Set(current);
             next.delete(originIndex);
             return next;
@@ -1315,7 +1332,7 @@ export function SoloGame({
       }
       const preStateHash = lastReplayStateHashRef.current;
       const visibleBefore = sessionKind === "GUIDED_PRACTICE"
-        ? visibleBoardStateForPractice(current)
+        ? visibleBoardStateForPractice(current, autoFlaggedIndexesRef.current)
         : null;
       const suggestionBefore = coachAnalysisRef.current;
       const expectedCoachAction: CoachAction = action === "TOGGLE_FLAG"
@@ -1423,7 +1440,7 @@ export function SoloGame({
       if (sessionKind !== "GUIDED_PRACTICE" || current.outcome !== "PLAYING") {
         return false;
       }
-      const visible = visibleBoardStateForPractice(current);
+      const visible = visibleBoardStateForPractice(current, autoFlaggedIndexesRef.current);
       const visibleStateHash = hashVisibleBoardState(visible);
       if (suggestion.stateHash !== visibleStateHash) {
         setNotice({ id: "practice.coach.stale" });
@@ -1469,7 +1486,7 @@ export function SoloGame({
         return false;
       }
       cancelCoachFeedbackAnalysis();
-      const visible = visibleBoardStateForPractice(current);
+      const visible = visibleBoardStateForPractice(current, autoFlaggedIndexesRef.current);
       if (!isCoachSuggestionApplicable(suggestion, visible)) return false;
       if (
         trigger === "AUTO_MARK" &&
@@ -1507,12 +1524,14 @@ export function SoloGame({
       practiceLastInteractionAtRef.current = actionAt;
       if (trigger === "AUTO_MARK") {
         practiceUsedAutoMarkRef.current = true;
+        autoFlaggedIndexesRef.current.add(cellIndex);
         setAutoFlaggedIndexes((currentIndexes) => {
           const next = new Set(currentIndexes);
           next.add(cellIndex);
           return next;
         });
       } else if (action === "UNFLAG") {
+        autoFlaggedIndexesRef.current.delete(cellIndex);
         setAutoFlaggedIndexes((currentIndexes) => {
           if (!currentIndexes.has(cellIndex)) return currentIndexes;
           const next = new Set(currentIndexes);
@@ -1522,6 +1541,7 @@ export function SoloGame({
       }
       if (delta.revealed.some(({ value }) => value >= 0)) {
         practiceSuppressedAutoFlagsRef.current.clear();
+        practiceAutoMarkEvidenceHashRef.current = null;
       }
 
       const safeReveals = delta.revealed.filter(({ value }) => value >= 0).length;
@@ -1568,24 +1588,88 @@ export function SoloGame({
     ],
   );
 
-  const applyNextAutomaticMine = useCallback(
+  const applyAutomaticMineBatch = useCallback(
     (suggestion: CoachSuggestion) => {
       const current = gameRef.current;
       if (current.outcome !== "PLAYING") return false;
-      const visible = visibleBoardStateForPractice(current);
-      const mineAction = coachMineActionsForApplication(suggestion, visible).find(
-        ({ cellIndex }) => !practiceSuppressedAutoFlagsRef.current.has(cellIndex),
+      const initialVisible = visibleBoardStateForPractice(
+        current,
+        autoFlaggedIndexesRef.current,
       );
-      if (!mineAction) return false;
-      return applyCoachAction(
-        {
-          ...suggestion,
+      const evidenceHash = hashVisibleBoardState({
+        ...initialVisible,
+        playerClaims: [],
+        provenMines: [],
+      });
+      if (practiceAutoMarkEvidenceHashRef.current === evidenceHash) return false;
+      practiceAutoMarkEvidenceHashRef.current = evidenceHash;
+
+      const batchSuggestion: CoachSuggestion = {
+        ...suggestion,
+        mineActions: suggestion.mineActions.filter(
+          ({ cellIndex }) => !practiceSuppressedAutoFlagsRef.current.has(cellIndex),
+        ),
+      };
+      let applied = false;
+      const appliedIndexes: number[] = [];
+      let firstAppliedAction: ReturnType<typeof coachMineActionForApplicationStep> = null;
+      for (let stepIndex = 0; ; stepIndex += 1) {
+        const latest = gameRef.current;
+        if (latest.outcome !== "PLAYING") break;
+        const latestVisible = visibleBoardStateForPractice(
+          latest,
+          autoFlaggedIndexesRef.current,
+        );
+        const mineAction = coachMineActionForApplicationStep(
+          batchSuggestion,
+          initialVisible,
+          latestVisible,
+          stepIndex,
+        );
+        if (!mineAction) break;
+        const reboundSuggestion: CoachSuggestion = {
+          ...batchSuggestion,
+          stateHash: mineAction.proof.stateHash,
+          mineActions: [mineAction],
           action: "FLAG",
           cellIndex: mineAction.cellIndex,
           proof: mineAction.proof,
-        },
-        "AUTO_MARK",
-      );
+        };
+        if (!applyCoachAction(reboundSuggestion, "AUTO_MARK")) break;
+        firstAppliedAction ??= mineAction;
+        appliedIndexes.push(mineAction.cellIndex);
+        applied = true;
+      }
+      if (applied && firstAppliedAction) {
+        // React batches the individual flag state updates into one paint. Give
+        // Canvas the complete dirty set so every flag glyph is redrawn, not
+        // just the final action while earlier cells only show the coach dot.
+        visualSequenceRef.current += 1;
+        setActionVisual({
+          id: visualSequenceRef.current,
+          actionType: "TOGGLE_FLAG",
+          originIndex: firstAppliedAction.cellIndex,
+          changedIndexes: appliedIndexes,
+          accepted: true,
+          revealedSafeCount: 0,
+        });
+        const latestVisible = visibleBoardStateForPractice(
+          gameRef.current,
+          autoFlaggedIndexesRef.current,
+        );
+        const latestHash = hashVisibleBoardState(latestVisible);
+        const proof = { ...firstAppliedAction.proof, stateHash: latestHash };
+        practiceAutoMarkExplanationRef.current = true;
+        setDisplayedCoachSuggestion({
+          ...batchSuggestion,
+          stateHash: latestHash,
+          action: "FLAG",
+          cellIndex: firstAppliedAction.cellIndex,
+          proof,
+          mineActions: [{ cellIndex: firstAppliedAction.cellIndex, proof }],
+        });
+      }
+      return applied;
     },
     [applyCoachAction],
   );
@@ -1598,7 +1682,10 @@ export function SoloGame({
       }
       if (manualRequest) practiceManualHintPendingRef.current = true;
       cancelCoachAnalysis();
-      const visibleState = visibleBoardStateForPractice(current);
+      const visibleState = visibleBoardStateForPractice(
+        current,
+        autoFlaggedIndexesRef.current,
+      );
       const requestedHash = hashVisibleBoardState(visibleState);
       const requestId = coachRequestRef.current + 1;
       coachRequestRef.current = requestId;
@@ -1633,7 +1720,10 @@ export function SoloGame({
         setCoachBusy(false);
         const latest = gameRef.current;
         if (latest.outcome !== "PLAYING") return;
-        const latestVisible = visibleBoardStateForPractice(latest);
+        const latestVisible = visibleBoardStateForPractice(
+          latest,
+          autoFlaggedIndexesRef.current,
+        );
         if (
           suggestion.requestId !== requestId ||
           suggestion.stateHash !== requestedHash ||
@@ -1663,7 +1753,7 @@ export function SoloGame({
           return;
         }
         if (autoMarkMinesRef.current) {
-          applyNextAutomaticMine(suggestion);
+          applyAutomaticMineBatch(suggestion);
         }
       };
 
@@ -1699,7 +1789,7 @@ export function SoloGame({
       }
     },
     [
-      applyNextAutomaticMine,
+      applyAutomaticMineBatch,
       cancelCoachAnalysis,
       sessionKind,
       setCurrentCoachAnalysis,
@@ -1713,7 +1803,7 @@ export function SoloGame({
       setNotice({ id: "practice.coach.waitingFirstMove" });
       return;
     }
-    const visible = visibleBoardStateForPractice(current);
+    const visible = visibleBoardStateForPractice(current, autoFlaggedIndexesRef.current);
     const analysis = coachAnalysisRef.current;
     if (analysis && analysis.stateHash === hashVisibleBoardState(visible)) {
       showCoachSuggestion(analysis, "REQUEST");
@@ -1745,10 +1835,11 @@ export function SoloGame({
     autoMarkMinesRef.current = next;
     setAutoMarkMines(next);
     if (!next) return;
+    practiceAutoMarkEvidenceHashRef.current = null;
     practiceUsedAutoMarkRef.current = true;
     const suggestion = coachAnalysisRef.current;
-    if (suggestion) applyNextAutomaticMine(suggestion);
-  }, [applyNextAutomaticMine]);
+    if (suggestion) applyAutomaticMineBatch(suggestion);
+  }, [applyAutomaticMineBatch]);
 
   useEffect(() => {
     if (sessionKind !== "GUIDED_PRACTICE" || status !== "PLAYING") {
@@ -1757,7 +1848,11 @@ export function SoloGame({
       setDisplayedCoachSuggestion(null);
       return;
     }
-    setDisplayedCoachSuggestion(null);
+    if (practiceAutoMarkExplanationRef.current) {
+      practiceAutoMarkExplanationRef.current = false;
+    } else {
+      setDisplayedCoachSuggestion(null);
+    }
     setCoachIdleSeconds(8);
     requestCoachAnalysis(false);
     return cancelCoachAnalysis;
@@ -1946,6 +2041,24 @@ export function SoloGame({
     getPendingHistoryWrites().some(
       ({ record }) => record.recordId === currentRunId,
     );
+  const reviewFinalBoard = () => {
+    const target = document.getElementById("solo-board");
+    if (!target) return;
+    target.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "center",
+    });
+    target.focus({ preventScroll: true });
+  };
+  const openPracticeHistory = () => {
+    setShowPracticeHistory(true);
+    window.requestAnimationFrame(() => {
+      document.getElementById("practice-history")?.scrollIntoView({
+        behavior: reducedMotion ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  };
 
   useEffect(() => {
     const runIdentity = runIdentityRef.current;
@@ -2269,10 +2382,13 @@ export function SoloGame({
           ...(displayedCoachSuggestion?.action === undefined
             ? {}
             : { action: displayedCoachSuggestion.action }),
-          autoFlaggedIndexes: [...autoFlaggedIndexes],
+          autoFlaggedIndexes: activeAutoFlaggedIndexes(
+            autoFlaggedIndexes,
+            game.visibility,
+          ),
         }
       : undefined,
-    [autoFlaggedIndexes, displayedCoachSuggestion, sessionKind],
+    [autoFlaggedIndexes, displayedCoachSuggestion, game.visibility, revision, sessionKind],
   );
   const displayedCoachVisibleState = useMemo<VisibleBoardState | null>(() => {
     if (
@@ -2282,7 +2398,7 @@ export function SoloGame({
     ) {
       return null;
     }
-    const visible = visibleBoardStateForPractice(game);
+    const visible = visibleBoardStateForPractice(game, autoFlaggedIndexesRef.current);
     return hashVisibleBoardState(visible) === displayedCoachSuggestion.stateHash
       ? visible
       : null;
@@ -2705,7 +2821,7 @@ export function SoloGame({
             >
               <span>{t("solo.flowCombo")}</span>
               <strong>×{comboState.count}</strong>
-              <em>{t(comboTier >= 12 ? "solo.combo.max" : comboTier >= 8 ? "solo.combo.high" : comboTier >= 4 ? "solo.combo.medium" : "solo.combo.low")}</em>
+              <em>{t(getSoloComboFeedbackKey(comboState.count))}</em>
               <div className="flow-combo-progress" aria-hidden="true">
                 <div
                   key={`${comboState.count}-${comboState.lastIncrementAtMs}`}
@@ -2838,16 +2954,24 @@ export function SoloGame({
                   practiceSaveState === "SAVING" ? (
                     <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
                   ) : practiceSaveState === "SAVED" ? (
-                    <a className="primary-button" href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("solo.analyze")}</a>
+                    <a className="primary-button" href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("practice.result.reviewReplay")}</a>
                   ) : (
-                    <a className="primary-button" href="#practice-history">{t("practice.result.history")}</a>
+                    <button className="primary-button" type="button" onClick={reviewFinalBoard}>{t("practice.result.reviewBoard")}</button>
                   )
                 ) : currentHistoryPending ? (
                   <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
                 ) : (
                   <a className="primary-button" href={`#/solo/replay/${encodeURIComponent(currentRunId)}`}>{t("solo.analyze")}</a>
                 )}
-                <button className="secondary-button" type="button" onClick={() => resetBoard()}>{t("solo.sameBoard")}</button>
+                {sessionKind === "GUIDED_PRACTICE" && practiceSaveState === "SAVED" && (
+                  <button className="secondary-button" type="button" onClick={reviewFinalBoard}>{t("practice.result.reviewBoard")}</button>
+                )}
+                {sessionKind === "GUIDED_PRACTICE" && practiceSaveState !== "SAVING" && (
+                  <button className="secondary-button" type="button" onClick={openPracticeHistory}>{t("practice.result.history")}</button>
+                )}
+                {sessionKind === "STANDARD" && (
+                  <button className="secondary-button" type="button" onClick={() => resetBoard()}>{t("solo.sameBoard")}</button>
+                )}
                 <button className="secondary-button" type="button" onClick={exitSolo}>{t("solo.home")}</button>
               </div>
             </section>
@@ -2993,10 +3117,12 @@ export function SoloGame({
         </div>
       ))}
       {sessionKind === "GUIDED_PRACTICE" ? (
-        <PracticeHistory
-          refreshToken={practiceHistoryRefresh}
-          store={practiceHistoryStoreRef.current}
-        />
+        (status !== "WON" && status !== "LOST") || showPracticeHistory ? (
+          <PracticeHistory
+            refreshToken={practiceHistoryRefresh}
+            store={practiceHistoryStoreRef.current}
+          />
+        ) : null
       ) : (
         <SoloHistory
           config={config}

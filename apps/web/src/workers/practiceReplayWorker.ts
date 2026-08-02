@@ -39,6 +39,7 @@ export type PracticeReplayWorkerResponse =
         readonly outcome: GameState["outcome"];
       }[];
       readonly terminal: {
+        readonly cells: readonly number[];
         readonly detonatedMine?: number;
         readonly otherMines: readonly number[];
         readonly correctFlags: readonly number[];
@@ -51,7 +52,16 @@ export type PracticeReplayWorkerResponse =
       readonly errorCode: "PRACTICE_REPLAY_INTEGRITY_FAILED" | "PRACTICE_REPLAY_BUILD_FAILED";
     };
 
-function visibleState(state: GameState): VisibleBoardState {
+function visibleState(
+  state: GameState,
+  provenMines: ReadonlySet<number> = new Set(),
+): VisibleBoardState {
+  const playerClaims = Array.from(state.visibility, (visibility, index) =>
+    visibility === CELL_FLAGGED ? index : -1,
+  ).filter((index) => index >= 0);
+  const activeProvenMines = [...provenMines]
+    .filter((index) => playerClaims.includes(index))
+    .sort((left, right) => left - right);
   return {
     width: state.board.spec.width,
     height: state.board.spec.height,
@@ -59,9 +69,8 @@ function visibleState(state: GameState): VisibleBoardState {
     clues: Array.from(state.visibility, (visibility, index) =>
       visibility === CELL_REVEALED ? (state.board.adjacent[index] ?? 0) : -1,
     ),
-    playerClaims: Array.from(state.visibility, (visibility, index) =>
-      visibility === CELL_FLAGGED ? index : -1,
-    ).filter((index) => index >= 0),
+    playerClaims,
+    ...(activeProvenMines.length > 0 ? { provenMines: activeProvenMines } : {}),
   };
 }
 
@@ -93,11 +102,22 @@ function buildResult(
   }
   try {
     const state = createGameState(createBoard(request.record.board.spec));
+    const provenMines = new Set<number>();
     for (const index of request.replay.initialFlags) toggleFlag(state, index);
     let detonatedMine: number | undefined;
     const steps = request.replay.events.map((event) => {
-      const before = analyzeVisibleBoard(visibleState(state));
+      const before = analyzeVisibleBoard(visibleState(state, provenMines));
       const delta = applyEvent(state, event);
+      if (event.eventType === "COACH_ACTION") {
+        if (event.action === "FLAG") provenMines.add(event.cellIndex);
+        else if (event.action === "UNFLAG") provenMines.delete(event.cellIndex);
+      } else if (
+        event.eventType === "PLAYER_ACTION" &&
+        event.actionType === "TOGGLE_FLAG" &&
+        state.visibility[event.cellIndex] !== CELL_FLAGGED
+      ) {
+        provenMines.delete(event.cellIndex);
+      }
       const hitMine = delta?.hitMine === true;
       if (hitMine) {
         detonatedMine = delta?.revealed.find(({ value }) => value < 0)?.index;
@@ -125,11 +145,17 @@ function buildResult(
     ).filter((index) => index >= 0);
     const correctFlags = flags.filter((index) => state.board.mines[index] === 1);
     const wrongFlags = flags.filter((index) => state.board.mines[index] !== 1);
+    const terminalCells = Array.from(state.visibility, (visibility, index) =>
+      visibility === CELL_REVEALED
+        ? (state.board.adjacent[index] ?? 0)
+        : visibility === CELL_FLAGGED ? -3 : -2
+    );
     return {
       requestId: request.requestId,
       ok: true,
       steps,
       terminal: {
+        cells: terminalCells,
         ...(detonatedMine === undefined ? {} : { detonatedMine }),
         otherMines: mines.filter((index) => index !== detonatedMine),
         correctFlags,
