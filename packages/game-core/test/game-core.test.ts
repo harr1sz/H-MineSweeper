@@ -568,7 +568,7 @@ describe("visible-board replay solver", () => {
           height,
           totalMines,
           clues,
-          playerClaims: [0, 5],
+          playerClaims: [],
         });
         expect(analysis.status).toBe("COMPLETE");
         const provedSafe = new Set(
@@ -632,7 +632,7 @@ describe("visible-board replay solver", () => {
           height: size,
           totalMines: mineSet.size,
           clues,
-          playerClaims: hidden.filter((_, index) => index % 4 === 0),
+          playerClaims: hidden.filter((index) => mineSet.has(index) && index % 4 === 0),
         }, 1_000_000);
         expect(analysis.status).toBe("COMPLETE");
         const provedSafe = new Set(analysis.proofs.filter(({ kind }) => kind === "SAFE").flatMap(({ targets }) => targets));
@@ -654,6 +654,38 @@ describe("visible-board replay solver", () => {
     expect(withFlag.status).toBe("COMPLETE");
     expect(withFlag.proofs).toEqual([]);
     expect(withFlag.proofs).toEqual(withoutFlag.proofs);
+  });
+
+  it("detects jointly impossible player claims across multiple constraints", () => {
+    const visible = {
+      width: 7,
+      height: 1,
+      totalMines: 2,
+      clues: [-1, 1, -1, 1, -1, 1, -1],
+    };
+    const withoutClaims = analyzeVisibleBoard({ ...visible, playerClaims: [] });
+    const compatibleClaims = analyzeVisibleBoard({ ...visible, playerClaims: [0, 4] });
+    const contradictoryClaims = analyzeVisibleBoard({ ...visible, playerClaims: [0, 6] });
+    const conclusions = (analysis: ReturnType<typeof analyzeVisibleBoard>) =>
+      analysis.proofs.map(({ stateHash: _stateHash, ...proof }) => proof);
+
+    expect(withoutClaims.status).toBe("COMPLETE");
+    expect(compatibleClaims.status).toBe("COMPLETE");
+    expect(contradictoryClaims.status).toBe("CONTRADICTION");
+    expect(conclusions(compatibleClaims)).toEqual(conclusions(withoutClaims));
+    expect(conclusions(contradictoryClaims)).toEqual(conclusions(withoutClaims));
+  });
+
+  it("does not turn an unfinished claim-consistency search into a contradiction", () => {
+    const partial = analyzeVisibleBoard({
+      width: 7,
+      height: 1,
+      totalMines: 2,
+      clues: [-1, 1, -1, 1, -1, 1, -1],
+      playerClaims: [0, 6],
+    }, 1);
+    expect(partial.status).toBe("PARTIAL");
+    expect(partial.searchedNodes).toBe(1);
   });
 
   it("solves a 2-3-2 frontier without requiring the player to flag known mines", () => {
@@ -695,17 +727,45 @@ describe("visible-board replay solver", () => {
   });
 
   it("uses the global remaining mine count after frontier constraints", () => {
-    const analysis = analyzeVisibleBoard({
+    const visible = {
       width: 4,
       height: 1,
       totalMines: 1,
       clues: [1, -1, -1, -1],
-      playerClaims: [3],
-    });
+    };
+    const analysis = analyzeVisibleBoard({ ...visible, playerClaims: [] });
+    const compatibleClaim = analyzeVisibleBoard({ ...visible, playerClaims: [1] });
+    const contradictoryClaim = analyzeVisibleBoard({ ...visible, playerClaims: [3] });
+    const conclusions = (result: ReturnType<typeof analyzeVisibleBoard>) =>
+      result.proofs.map(({ stateHash: _stateHash, ...proof }) => proof);
+
     expect(analysis.status).toBe("COMPLETE");
+    expect(compatibleClaim.status).toBe("COMPLETE");
+    expect(contradictoryClaim.status).toBe("CONTRADICTION");
+    expect(conclusions(compatibleClaim)).toEqual(conclusions(analysis));
+    expect(conclusions(contradictoryClaim)).toEqual(conclusions(analysis));
     expect(analysis.proofs).toEqual(expect.arrayContaining([
       expect.objectContaining({ rule: "SINGLE_MINE", targets: [1] }),
       expect.objectContaining({ rule: "GLOBAL_SAFE", targets: [2, 3] }),
     ]));
+  });
+
+  it("keeps every global-search constraint in a CSP proof", () => {
+    const analysis = analyzeVisibleBoard({
+      width: 4,
+      height: 3,
+      totalMines: 1,
+      clues: [-1, -1, -1, -1, 1, -1, 1, -1, -1, -1, -1, -1],
+      playerClaims: [],
+    });
+    const proof = analysis.proofs.find(
+      ({ rule, targets }) => rule === "CSP_SAFE" && targets.includes(0),
+    );
+
+    expect(proof).toMatchObject({
+      kind: "SAFE",
+      sources: [4, 6],
+      targets: [0],
+    });
   });
 });

@@ -10,8 +10,7 @@ import {
   toggleFlag,
   type GameState,
 } from "@h-minesweeper/game-core";
-import { useLocale } from "../i18n";
-import { academySpecialMessage, type AcademySpecialMessageId } from "./academy-special-messages";
+import { useLocale, type MessageId } from "../i18n";
 
 function createChordState(): GameState {
   const state = createGameState(createBoard({
@@ -53,32 +52,32 @@ export function AcademyChordLesson({
   readonly stageIndex: number;
   readonly onComplete: () => void;
 }) {
-  const { locale, t } = useLocale();
+  const { t } = useLocale();
   const stateRef = useRef(createChordState());
   const completedRef = useRef(false);
   const [revision, setRevision] = useState(0);
-  const [feedbackId, setFeedbackId] = useState<AcademySpecialMessageId>("chord.start");
+  const [feedbackId, setFeedbackId] = useState<MessageId>("academy.chord.start");
 
   const reset = () => {
     stateRef.current = createChordState();
     completedRef.current = false;
-    setFeedbackId("chord.start");
+    setFeedbackId("academy.chord.start");
     setRevision((value) => value + 1);
   };
   useEffect(reset, [stageIndex]);
 
   const apply = (accepted: boolean, hitMine: boolean, action: "REVEAL" | "FLAG" | "CHORD") => {
     const state = stateRef.current;
-    if (!accepted) setFeedbackId("chord.unavailable");
-    else if (hitMine) setFeedbackId("chord.wrongFlagLoss");
+    if (!accepted) setFeedbackId("academy.chord.unavailable");
+    else if (hitMine) setFeedbackId("academy.chord.wrongFlagLoss");
     else if (state.outcome === "WON") {
-      setFeedbackId(action === "CHORD" ? "chord.completeExpand" : "chord.completeDirect");
+      setFeedbackId(action === "CHORD" ? "academy.chord.completeExpand" : "academy.chord.completeDirect");
       if (!completedRef.current) {
         completedRef.current = true;
         onComplete();
       }
-    } else if (action === "FLAG") setFeedbackId("chord.flagPlaced");
-    else setFeedbackId("chord.keepGoing");
+    } else if (action === "FLAG") setFeedbackId("academy.chord.flagPlaced");
+    else setFeedbackId("academy.chord.keepGoing");
     setRevision((value) => value + 1);
   };
 
@@ -104,8 +103,8 @@ export function AcademyChordLesson({
   const state = stateRef.current;
   void revision;
   return <div className="academy-first-board-wrap">
-    <p>{academySpecialMessage(locale, "chord.instructions")}</p>
-    <div className="academy-first-board" role="grid" aria-label={academySpecialMessage(locale, "chord.aria")}>
+    <p>{t("academy.chord.instructions")}</p>
+    <div className="academy-first-board" role="grid" aria-label={t("academy.chord.aria")}>
       {Array.from({ length: 25 }, (_, displayIndex) => {
         const index = transformedIndex(displayIndex, stageIndex);
         const visibility = state.visibility[index];
@@ -119,8 +118,8 @@ export function AcademyChordLesson({
           aria-label={visibility === CELL_REVEALED
             ? t(clue === 0 ? "academy.openBlankCell" : "academy.openNumberCell", { value: clue })
             : visibility === CELL_FLAGGED
-              ? academySpecialMessage(locale, "firstBoard.flagged", { row, column })
-              : academySpecialMessage(locale, "firstBoard.hidden", { row, column })}
+              ? t("academy.firstBoard.flagged", { row, column })
+              : t("academy.firstBoard.hidden", { row, column })}
           className={`academy-cell${visibility === CELL_REVEALED ? ` cell-open${clue === 0 ? " is-empty" : ` number-${clue}`}` : visibility === CELL_FLAGGED ? " cell-known-mine" : " cell-unknown"}`}
           onClick={() => activate(index)}
           onContextMenu={(event) => { event.preventDefault(); flag(index); }}
@@ -128,7 +127,7 @@ export function AcademyChordLesson({
         >{visibility === CELL_REVEALED ? (clue || "") : visibility === CELL_FLAGGED ? "⚑" : "?"}</button>;
       })}
     </div>
-    <div className={`academy-feedback${state.outcome === "WON" ? " is-success" : ""}`} aria-live="polite"><p>{academySpecialMessage(locale, feedbackId)}</p></div>
-    {state.outcome === "LOST" && <button className="secondary-button" type="button" onClick={reset}>{academySpecialMessage(locale, "chord.retry")}</button>}
+    <div className={`academy-feedback${state.outcome === "WON" ? " is-success" : ""}`} aria-live="polite"><p>{t(feedbackId)}</p></div>
+    {state.outcome === "LOST" && <button className="secondary-button" type="button" onClick={reset}>{t("academy.chord.retry")}</button>}
   </div>;
 }

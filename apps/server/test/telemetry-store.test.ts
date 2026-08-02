@@ -1010,4 +1010,114 @@ describe("SqliteTelemetryStore", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("strictly validates event-local practice telemetry properties", () => {
+    expect(
+      sanitizeTelemetryProperties("mode_selected", {
+        mode: "guided_practice",
+        source: "home",
+      }),
+    ).toEqual({ mode: "guided_practice", source: "home" });
+    expect(
+      sanitizeTelemetryProperties("practice_run_started", {
+        trainingSessionId: "practice-session-123456",
+        preset: "beginner",
+        generationMode: "no_guess",
+        width: 9,
+        height: 9,
+        mines: 10,
+        assistMode: "AUTO_MARK_MINES",
+      }),
+    ).toEqual({
+      trainingSessionId: "practice-session-123456",
+      preset: "beginner",
+      generationMode: "no_guess",
+      width: 9,
+      height: 9,
+      mines: 10,
+      assistMode: "AUTO_MARK_MINES",
+    });
+    expect(
+      sanitizeTelemetryProperties("practice_hint_shown", {
+        trigger: "REQUEST",
+        status: "PARTIAL",
+        action: "NONE",
+      }),
+    ).toEqual({
+      trigger: "REQUEST",
+      status: "PARTIAL",
+      action: "NONE",
+    });
+    expect(
+      sanitizeTelemetryProperties("practice_assist_applied", {
+        trigger: "DEMONSTRATE",
+        action: "REVEAL",
+      }),
+    ).toEqual({ trigger: "DEMONSTRATE", action: "REVEAL" });
+    expect(
+      sanitizeTelemetryProperties("practice_run_terminal", {
+        trainingSessionId: "practice-session-123456",
+        preset: "beginner",
+        generationMode: "classic",
+        outcome: "LOST",
+        elapsedMs: 1_234.5,
+        playerActions: 4,
+        hintsShown: 2,
+        hintsRequested: 1,
+        autoFlags: 0,
+        demonstratedActions: 1,
+        historySaved: false,
+        historyFailureReason: "REPLAY_LIMIT",
+      }),
+    ).toMatchObject({
+      outcome: "LOST",
+      historyFailureReason: "REPLAY_LIMIT",
+    });
+    expect(
+      sanitizeTelemetryProperties(
+        "practice_no_guess_generation_finished",
+        {
+          preset: "expert",
+          success: false,
+          attempts: 50,
+          elapsedMs: 5_000,
+          failureReason: "TIME_LIMIT",
+        },
+      ),
+    ).toMatchObject({ success: false, failureReason: "TIME_LIMIT" });
+
+    expect(
+      sanitizeTelemetryProperties("practice_hint_shown", {
+        trigger: "AUTO_MARK",
+        status: "READY",
+        action: "FLAG",
+      }),
+    ).toBeUndefined();
+    expect(
+      sanitizeTelemetryProperties("practice_assist_applied", {
+        trigger: "DEMONSTRATE",
+        action: "NONE",
+      }),
+    ).toBeUndefined();
+    expect(
+      sanitizeTelemetryProperties("practice_run_terminal", {
+        outcome: "ABANDONED",
+      }),
+    ).toBeUndefined();
+    expect(
+      sanitizeTelemetryProperties("practice_run_terminal", {
+        playerActions: 1.5,
+      }),
+    ).toBeUndefined();
+    expect(
+      sanitizeTelemetryProperties("practice_run_started", {
+        width: 4,
+      }),
+    ).toBeUndefined();
+    expect(
+      sanitizeTelemetryProperties("practice_run_started", {
+        seed: "hidden-board-input",
+      }),
+    ).toBeUndefined();
+  });
 });

@@ -483,7 +483,7 @@ export function SoloHistory({
             <div>
               <span>{t("history.latestBest")}</span>
               <strong>{formatTime(trend.latestElapsedMs)}</strong>
-              <small>BEST {formatTime(trend.bestElapsedMs)}</small>
+              <small>{t("history.best")} {formatTime(trend.bestElapsedMs)}</small>
             </div>
             <div>
               <span>{t("history.average")}</span>
@@ -493,7 +493,7 @@ export function SoloHistory({
             <div>
               <span>{t("history.recentBest3bv")}</span>
               <strong>{formatMetric(trend.latestThreeBvPerSecond)}</strong>
-              <small>BEST {formatMetric(trend.bestThreeBvPerSecond)}</small>
+              <small>{t("history.best")} {formatMetric(trend.bestThreeBvPerSecond)}</small>
             </div>
             <div>
               <span>{t("history.recentBestIoe")}</span>
@@ -503,7 +503,7 @@ export function SoloHistory({
                   : `${(trend.latestIoe * 100).toFixed(1)}%`}
               </strong>
               <small>
-                BEST{" "}
+                {t("history.best")}{" "}
                 {trend.bestIoe === null
                   ? "—"
                   : `${(trend.bestIoe * 100).toFixed(1)}%`}

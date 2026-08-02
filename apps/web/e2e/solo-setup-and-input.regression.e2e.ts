@@ -40,7 +40,7 @@ async function openSoloSetup(page: Page): Promise<void> {
   await page.goto("/");
   await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
   await expect(
-    page.getByRole("heading", { name: "配置单人训练" }),
+    page.getByRole("heading", { name: "配置单人对局" }),
   ).toBeVisible();
 }
 
@@ -61,12 +61,12 @@ test("solo uses a configuration gateway before rendering the board", async ({
   await page.getByRole("button", { name: /高级 30×16/ }).click();
   await page.getByRole("button", { name: "无猜模式" }).click();
   await page.getByRole("button", { name: "详细数据" }).click();
-  await page.getByRole("button", { name: "专业", exact: true }).click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "经典", exact: true }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
 
   await expect(page.locator('canvas[role="grid"]')).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "配置单人训练" }),
+    page.getByRole("heading", { name: "配置单人对局" }),
   ).toHaveCount(0);
   await expect(page.getByText("高级 · 30×16 / 99 · 无猜模式")).toBeVisible();
   await expect(page.getByText(/双击数字：快速展开/)).toBeVisible();
@@ -78,7 +78,7 @@ test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", as
 }) => {
   await openSoloSetup(page);
   await page.getByRole("button", { name: "详细数据" }).click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
 
   const width = 9;
   const height = 9;

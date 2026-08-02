@@ -14,7 +14,7 @@ test("ISSUE-005 skip links transfer focus and leave the viewport", async ({
   await expect(mainSkipLink).not.toBeFocused();
 
   await page.goto("/#/solo");
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await page.locator("#main-content").focus();
   const boardSkipLink = page.getByRole("link", { name: "跳到棋盘" });
   await page.keyboard.press("Tab");

@@ -25,11 +25,13 @@ import {
 import { formatDuration, formatRtt, normalizeRoomCode } from "./lib/format";
 import { percentile, recordMetric } from "./lib/performance";
 import type { SoloBoardConfig, SoloGenerationMode } from "./lib/solo";
+import type { SoloSessionKind } from "./lib/practice-coach";
 import { useTelemetry } from "./components/TelemetryPrivacy";
 
 const Academy = lazy(() => import("./components/Academy").then((module) => ({ default: module.Academy })));
 const SoloGame = lazy(() => import("./components/SoloGame").then((module) => ({ default: module.SoloGame })));
 const ReplayReview = lazy(() => import("./components/ReplayReview").then((module) => ({ default: module.ReplayReview })));
+const PracticeReplayReview = lazy(() => import("./components/PracticeReplayReview").then((module) => ({ default: module.PracticeReplayReview })));
 const CanvasBoard = lazy(() => import("./components/CanvasBoard").then((module) => ({ default: module.CanvasBoard })));
 const ProgressChart = lazy(() => import("./components/ProgressChart").then((module) => ({ default: module.ProgressChart })));
 import {
@@ -42,7 +44,11 @@ import {
   type OptimisticGameSnapshot,
 } from "./lib/realtime";
 import { DUEL_EXPERIMENT_ENABLED } from "./lib/build-config";
-import { LocaleToggle, useLocale, type MessageId, type MessageValues } from "./i18n";
+import {
+  LocaleToggle,
+  useLocale,
+  type MessageDescriptor,
+} from "./i18n";
 
 type UiPhase =
   | "HOME"
@@ -53,7 +59,7 @@ type UiPhase =
   | "MATCH_RESULT";
 
 type HomeMode = "solo" | "academy" | "duel";
-type LocalMode = "solo" | "academy" | "replay" | null;
+type LocalMode = "solo" | "academy" | "replay" | "practice-replay" | null;
 type MotionPreference = "system" | "full" | "reduced";
 type EffectsProfile = "full" | "lite" | "essential";
 
@@ -65,10 +71,20 @@ interface PendingOptimisticAction {
 }
 
 function readLocalModeFromLocation(): LocalMode {
+  if (window.location.hash.startsWith("#/solo/practice/replay/")) return "practice-replay";
   if (window.location.hash.startsWith("#/solo/replay/")) return "replay";
   if (window.location.hash.startsWith("#/solo")) return "solo";
   if (window.location.hash.startsWith("#/academy")) return "academy";
   return null;
+}
+
+function readPracticeReplayRecordId(): string {
+  try {
+    const recordId = decodeURIComponent(window.location.hash.slice("#/solo/practice/replay/".length));
+    return /^[A-Za-z0-9._:-]{1,128}$/.test(recordId) ? recordId : "";
+  } catch {
+    return "";
+  }
 }
 
 function readReplayRecordId(): string {
@@ -92,25 +108,23 @@ function readInitialHomeMode(): HomeMode {
   return readInvitedRoomCode() ? "duel" : "solo";
 }
 
-type Translator = (id: MessageId, values?: MessageValues) => string;
-
-function duelEntryError(error: unknown, t: Translator): string {
+function duelEntryError(error: unknown): MessageDescriptor {
   if (!(error instanceof ApiError)) {
-    return t("duel.entry.generic");
+    return { id: "duel.entry.generic" };
   }
   if (error.code === "ROOM_FULL") {
-    return t("duel.entry.full");
+    return { id: "duel.entry.full" };
   }
   if (error.code === "ROOM_NOT_FOUND") {
-    return t("duel.entry.notFound");
+    return { id: "duel.entry.notFound" };
   }
   if (error.code === "ALREADY_JOINED") {
-    return t("duel.entry.joined");
+    return { id: "duel.entry.joined" };
   }
   if (error.code === "RATE_LIMITED") {
-    return t("duel.entry.rateLimited");
+    return { id: "duel.entry.rateLimited" };
   }
-  return t("duel.entry.generic");
+  return { id: "duel.entry.generic" };
 }
 
 function duelInviteUrl(roomCode: string): string {
@@ -122,9 +136,16 @@ function duelInviteUrl(roomCode: string): string {
 }
 
 function readSoloLaunchModeFromLocation(): SoloGenerationMode {
+  if (window.location.hash === "#/solo/practice") return "no_guess";
   return window.location.hash === "#/solo/no-guess"
     ? "no_guess"
     : "classic";
+}
+
+function readSoloSessionKindFromLocation(): SoloSessionKind {
+  return window.location.hash === "#/solo/practice"
+    ? "GUIDED_PRACTICE"
+    : "STANDARD";
 }
 
 function safeLocalStorageGet(key: string): string | null {
@@ -182,8 +203,8 @@ interface PlayerSummary {
 }
 
 interface ResultSummary {
-  title: string;
-  detail: string;
+  title: MessageDescriptor;
+  detail: MessageDescriptor;
   winnerId?: string;
   reason?: string;
 }
@@ -197,23 +218,22 @@ function resultCopy(
   localPlayerId: string,
   reason: string | undefined,
   match: boolean,
-  t: Translator,
 ): ResultSummary {
   if (!winnerId) {
     return {
-      title: t(match ? "duel.result.matchDraw" : "duel.result.roundDraw"),
+      title: { id: match ? "duel.result.matchDraw" : "duel.result.roundDraw" },
       detail: match
-        ? t("duel.result.noMatch")
+        ? { id: "duel.result.noMatch" }
         : reason === "NO_CONTEST"
-          ? t("duel.result.noRound")
-          : t("duel.result.nextBoard"),
+          ? { id: "duel.result.noRound" }
+          : { id: "duel.result.nextBoard" },
       ...(reason === undefined ? {} : { reason }),
     };
   }
   const won = winnerId === localPlayerId;
   return {
-    title: t(match ? won ? "duel.result.matchWin" : "duel.result.matchLoss" : won ? "duel.result.roundWin" : "duel.result.roundLoss"),
-    detail: t(won ? "duel.result.winDetail" : "duel.result.lossDetail"),
+    title: { id: match ? won ? "duel.result.matchWin" : "duel.result.matchLoss" : won ? "duel.result.roundWin" : "duel.result.roundLoss" },
+    detail: { id: won ? "duel.result.winDetail" : "duel.result.lossDetail" },
     winnerId,
     ...(reason === undefined ? {} : { reason }),
   };
@@ -247,6 +267,8 @@ export function App() {
   );
   const [soloLaunchMode, setSoloLaunchMode] =
     useState<SoloGenerationMode>(readSoloLaunchModeFromLocation);
+  const [soloSessionKind, setSoloSessionKind] =
+    useState<SoloSessionKind>(readSoloSessionKindFromLocation);
   const [soloLaunchConfig, setSoloLaunchConfig] = useState<SoloBoardConfig | undefined>();
   const [homeMode, setHomeMode] = useState<HomeMode>(readInitialHomeMode);
   const [connection, setConnection] = useState<ConnectionStatus>("disconnected");
@@ -275,8 +297,8 @@ export function App() {
   const [replayId, setReplayId] = useState("");
   const [authoritativeHash, setAuthoritativeHash] = useState("");
   const [progressHistory, setProgressHistory] = useState<ProgressPoint[]>([]);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [error, setError] = useState<MessageDescriptor | null>(null);
+  const [notice, setNotice] = useState<MessageDescriptor | null>(null);
   const [busy, setBusy] = useState(false);
   const [motionPreference, setMotionPreference] = useState<MotionPreference>(
     readMotionPreference,
@@ -335,6 +357,7 @@ export function App() {
       }
       setLocalMode(nextLocalMode);
       setSoloLaunchMode(readSoloLaunchModeFromLocation());
+      setSoloSessionKind(readSoloSessionKindFromLocation());
       window.scrollTo({ top: 0, behavior: "auto" });
     };
     window.addEventListener("popstate", handleNavigation);
@@ -443,12 +466,12 @@ export function App() {
           : player,
       ),
     );
-    setNotice("");
+    setNotice(null);
     setConnectionLost(true);
     setRoundFinishedAt((current) => current ?? Date.now());
     setResult({
-      title: t("duel.result.technical"),
-      detail: t("duel.result.technicalDetail"),
+      title: { id: "duel.result.technical" },
+      detail: { id: "duel.result.technicalDetail" },
       reason: "TECHNICAL_DNF",
     });
     setPhase("MATCH_RESULT");
@@ -457,19 +480,19 @@ export function App() {
       round: roundRef.current,
     });
     void flushTelemetry();
-  }, [flushTelemetry, t, track]);
+  }, [flushTelemetry, track]);
 
-  const failIntegrity = useCallback((detail: string) => {
+  const failIntegrity = useCallback((detail: MessageDescriptor) => {
     pendingActionsRef.current.clear();
     phaseRef.current = "MATCH_RESULT";
     setConnectionLost(true);
     setRoundFinishedAt((current) => current ?? Date.now());
     setResult({
-      title: t("duel.result.integrity"),
+      title: { id: "duel.result.integrity" },
       detail,
       reason: "STATE_DIVERGENCE",
     });
-    setError(t("duel.error.integrity"));
+    setError({ id: "duel.error.integrity" });
     setPhase("MATCH_RESULT");
     realtimeRef.current.disconnect();
     track("duel_dnf", {
@@ -477,7 +500,7 @@ export function App() {
       round: roundRef.current,
     });
     void flushTelemetry();
-  }, [flushTelemetry, t, track]);
+  }, [flushTelemetry, track]);
 
   const handleConnectionStatus = useCallback(
     (status: ConnectionStatus) => {
@@ -496,7 +519,7 @@ export function App() {
         return;
       }
       if (phaseRef.current === "LOBBY") {
-        setError(t("duel.error.connectionLost"));
+        setError({ id: "duel.error.connectionLost" });
         setPhase("HOME");
         return;
       }
@@ -513,7 +536,7 @@ export function App() {
       pendingAction?: PendingOptimisticAction,
     ) => {
       if (!baseStateHash) {
-        setError(t("duel.error.noBaseline"));
+        setError({ id: "duel.error.noBaseline" });
         return false;
       }
       actionCounterRef.current += 1;
@@ -538,7 +561,7 @@ export function App() {
       });
       if (!sent) {
         pendingActionsRef.current.delete(clientActionId);
-        setError(t("duel.error.unavailable"));
+        setError({ id: "duel.error.unavailable" });
       }
       return sent;
     },
@@ -578,7 +601,7 @@ export function App() {
         );
         if (sequenceStatus === "DUPLICATE") return;
         if (sequenceStatus === "GAP") {
-          failIntegrity(t("duel.integrity.sequenceGap"));
+          failIntegrity({ id: "duel.integrity.sequenceGap" });
           return;
         }
         processedServerSeqRef.current = message.serverSeq;
@@ -594,7 +617,7 @@ export function App() {
           setMatchId(message.matchId);
           setConnectionEpoch(message.connectionEpoch);
           setPhase("LOBBY");
-          setNotice(t("duel.notice.connected"));
+          setNotice({ id: "duel.notice.connected" });
           break;
         }
         case "ROOM_STATE": {
@@ -603,7 +626,7 @@ export function App() {
           if (message.matchId) setMatchId(message.matchId);
           if (message.phase === "REMATCH") {
             const votes = message.players.filter((player) => player.rematch).length;
-            setNotice(t("duel.notice.rematchVotes", { votes }));
+            setNotice({ id: "duel.notice.rematchVotes", values: { votes } });
           } else if (message.phase !== "CLOSED") {
             setPhase(message.phase);
           }
@@ -614,14 +637,14 @@ export function App() {
             message.boardVisibility !== "client_seed" ||
             !("seed" in message.boardSpec)
           ) {
-            setError(t("duel.error.privateBoard"));
+            setError({ id: "duel.error.privateBoard" });
             return;
           }
           try {
             gameRef.current = createGameState(createBoard(message.boardSpec));
             setGameRevision((value) => value + 1);
           } catch (cause) {
-            setError(t("duel.error.boardGeneration"));
+            setError({ id: "duel.error.boardGeneration" });
           }
           setRound(message.round);
           setCountdownDeadline(
@@ -664,11 +687,11 @@ export function App() {
             pendingActionsRef.current.size,
           );
           if (message.accepted === false) {
-            setNotice(t("duel.notice.rejected"));
+            setNotice({ id: "duel.notice.rejected" });
           }
           if (reconciliationPlan === "WAIT_FOR_SNAPSHOT") {
             snapshotRequiredRef.current = true;
-            setNotice(t("duel.notice.reconciling"));
+            setNotice({ id: "duel.notice.reconciling" });
             return;
           }
           const activeGame = gameRef.current;
@@ -695,7 +718,7 @@ export function App() {
               localStateHash !== expectedLocalHash ||
               localStateHash !== message.authoritativeStateHash
             ) {
-              failIntegrity(t("duel.integrity.actionHash"));
+              failIntegrity({ id: "duel.integrity.actionHash" });
               return;
             }
           }
@@ -750,7 +773,6 @@ export function App() {
               playerIdRef.current,
               message.reason,
               false,
-              t,
             ),
           );
           setPhase("ROUND_RESULT");
@@ -767,7 +789,6 @@ export function App() {
               playerIdRef.current,
               message.reason,
               true,
-              t,
             ),
           );
           setPhase("MATCH_RESULT");
@@ -800,7 +821,7 @@ export function App() {
           snapshotRequiredRef.current = false;
           setRoundFinishedAt(null);
           setPhase("LOBBY");
-          setNotice(t("duel.notice.newMatch"));
+          setNotice({ id: "duel.notice.newMatch" });
           break;
         }
         case "SNAPSHOT": {
@@ -822,7 +843,6 @@ export function App() {
                 playerIdRef.current,
                 snapshot.matchResult.reason,
                 true,
-                t,
               ),
             );
           }
@@ -836,7 +856,7 @@ export function App() {
               if (
                 snapshot.ownGame.visibility.length !== restored.visibility.length
               ) {
-                failIntegrity(t("duel.integrity.snapshotSize"));
+                failIntegrity({ id: "duel.integrity.snapshotSize" });
                 return;
               }
               restored.visibility.set(snapshot.ownGame.visibility);
@@ -848,14 +868,14 @@ export function App() {
               );
               restored.outcome = snapshot.ownGame.outcome;
               if (hashGameState(restored) !== snapshot.ownGame.stateHash) {
-                failIntegrity(t("duel.integrity.snapshotHash"));
+                failIntegrity({ id: "duel.integrity.snapshotHash" });
                 return;
               }
               gameRef.current = restored;
               setAuthoritativeHash(snapshot.ownGame.stateHash);
               setGameRevision((value) => value + 1);
             } catch {
-              failIntegrity(t("duel.integrity.snapshotRestore"));
+              failIntegrity({ id: "duel.integrity.snapshotRestore" });
               return;
             }
           } else {
@@ -867,7 +887,7 @@ export function App() {
             );
           }
           if (snapshot.phase === "REMATCH") {
-            setNotice(t("duel.notice.rematchWaiting"));
+            setNotice({ id: "duel.notice.rematchWaiting" });
           } else if (snapshot.phase !== "CLOSED") {
             setPhase(snapshot.phase);
           }
@@ -878,11 +898,11 @@ export function App() {
             protocolBlockedRef.current = true;
             snapshotRequiredRef.current = true;
             pendingActionsRef.current.clear();
-            setError(t("duel.error.protocol"));
-            setNotice(t("duel.notice.upgrade"));
+            setError({ id: "duel.error.protocol" });
+            setNotice({ id: "duel.notice.upgrade" });
             break;
           }
-          setError(t("duel.entry.generic"));
+          setError({ id: "duel.entry.generic" });
           break;
         }
         case "PONG": {
@@ -895,23 +915,23 @@ export function App() {
 
   const enterRoom = async (mode: "create" | "join") => {
     if (!DUEL_EXPERIMENT_ENABLED) {
-      setError(t("duel.error.closed"));
+      setError({ id: "duel.error.closed" });
       return;
     }
     const name = displayName.trim();
     if (name.length < 2) {
-      setError(t("duel.error.nickname"));
+      setError({ id: "duel.error.nickname" });
       return;
     }
     if (mode === "join" && joinCode.length !== 6) {
-      setError(t("duel.error.roomCode"));
+      setError({ id: "duel.error.roomCode" });
       return;
     }
 
     setBusy(true);
     const entryStartedAt = performance.now();
-    setError("");
-    setNotice("");
+    setError(null);
+    setNotice(null);
     safeLocalStorageSet("hms-display-name", name);
     try {
       const guest = await createGuestSession(name);
@@ -943,7 +963,7 @@ export function App() {
       }
       void flushTelemetry();
     } catch (cause) {
-      setError(duelEntryError(cause, t));
+      setError(duelEntryError(cause));
       setConnection("error");
     } finally {
       setBusy(false);
@@ -1018,36 +1038,46 @@ export function App() {
     setAuthoritativeHash("");
     setMatchActionVisual(undefined);
     pendingActionsRef.current.clear();
-    setError("");
-    setNotice("");
+    setError(null);
+    setNotice(null);
   };
   leaveRoomRef.current = leaveRoom;
 
   const pushLocalMode = (
     nextMode: Exclude<LocalMode, null>,
     soloMode: SoloGenerationMode = "classic",
+    sessionKind: SoloSessionKind = "STANDARD",
   ) => {
     const hash =
       nextMode === "academy"
         ? "#/academy"
-        : soloMode === "no_guess"
+        : sessionKind === "GUIDED_PRACTICE"
+          ? "#/solo/practice"
+          : soloMode === "no_guess"
           ? "#/solo/no-guess"
           : "#/solo";
     window.history.pushState(
-      { hmsLocalMode: nextMode, soloGenerationMode: soloMode },
+      { hmsLocalMode: nextMode, soloGenerationMode: soloMode, soloSessionKind: sessionKind },
       "",
       hash,
     );
     setSoloLaunchMode(soloMode);
+    setSoloSessionKind(sessionKind);
     setLocalMode(nextMode);
     window.scrollTo({ top: 0, behavior: "auto" });
   };
 
-  const enterSolo = (soloMode: SoloGenerationMode = "classic") => {
+  const enterSolo = (
+    soloMode: SoloGenerationMode = "classic",
+    sessionKind: SoloSessionKind = "STANDARD",
+  ) => {
     leaveRoom();
     setSoloLaunchConfig(undefined);
-    track("mode_selected", { mode: "solo", source: "home" });
-    pushLocalMode("solo", soloMode);
+    track("mode_selected", {
+      mode: sessionKind === "GUIDED_PRACTICE" ? "guided_practice" : "solo",
+      source: "home",
+    });
+    pushLocalMode("solo", soloMode, sessionKind);
   };
 
   const enterAcademy = () => {
@@ -1067,6 +1097,7 @@ export function App() {
       hash,
     );
     setSoloLaunchMode(soloMode);
+    setSoloSessionKind("STANDARD");
     setSoloLaunchConfig(board ? { ...board, mode: soloMode } : undefined);
     setLocalMode("solo");
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -1089,8 +1120,8 @@ export function App() {
       mode: nextMode,
       source: "home",
     });
-    setError("");
-    setNotice("");
+    setError(null);
+    setNotice(null);
   };
 
   const playerLabels = useMemo(
@@ -1153,7 +1184,11 @@ export function App() {
           {localMode
             ? localMode === "solo"
               ? t("status.localSolo")
-              : localMode === "replay" ? t("status.localReplay") : t("status.academy")
+              : localMode === "replay"
+                ? t("status.localReplay")
+                : localMode === "practice-replay"
+                  ? t("status.practiceReplay")
+                  : t("status.academy")
             : connection === "connected"
               ? t("status.online")
               : t("status.standby")}
@@ -1207,13 +1242,16 @@ export function App() {
 
       <main id="main-content" tabIndex={-1}>
         <Suspense fallback={<div className="loading-panel" role="status">{t("common.loading")}</div>}>
-        {localMode === "replay" ? (
+        {localMode === "practice-replay" ? (
+          <PracticeReplayReview recordId={readPracticeReplayRecordId()} onExit={exitLocalMode} />
+        ) : localMode === "replay" ? (
           <ReplayReview recordId={readReplayRecordId()} onExit={exitLocalMode} />
         ) : localMode === "solo" ? (
           <SoloGame
-            key={`solo-${soloLaunchMode}-${soloLaunchConfig?.width ?? "saved"}-${soloLaunchConfig?.height ?? "saved"}-${soloLaunchConfig?.mines ?? "saved"}`}
+            key={`solo-${soloSessionKind}-${soloLaunchMode}-${soloLaunchConfig?.width ?? "saved"}-${soloLaunchConfig?.height ?? "saved"}-${soloLaunchConfig?.mines ?? "saved"}`}
             effectsProfile={effectsProfile}
             initialGenerationMode={soloLaunchMode}
+            initialSessionKind={soloSessionKind}
             {...(soloLaunchConfig ? { initialBoardConfig: soloLaunchConfig } : {})}
             reducedMotion={reducedMotion}
             onExit={exitLocalMode}
@@ -1282,9 +1320,9 @@ export function App() {
                   </>
                 ) : (
                   <>
-                    <span><b>01</b> Expert 30×16 / 99</span>
-                    <span><b>02</b> Best of 3</span>
-                    <span><b>03</b> Server validated</span>
+                    <span><b>01</b> {t("duel.home.expertBoard")}</span>
+                    <span><b>02</b> {t("duel.home.bestOfThree")}</span>
+                    <span><b>03</b> {t("duel.home.serverValidated")}</span>
                   </>
                 )}
               </div>
@@ -1329,7 +1367,7 @@ export function App() {
                 >
                   <span>03</span>
                   <strong>{t("home.duel")}</strong>
-                  <small>{DUEL_EXPERIMENT_ENABLED ? "REALTIME" : "PAUSED"}</small>
+                  <small>{t(DUEL_EXPERIMENT_ENABLED ? "duel.home.realtime" : "duel.home.paused")}</small>
                 </button>
               </div>
 
@@ -1345,6 +1383,13 @@ export function App() {
                       onClick={() => enterSolo()}
                     >
                       {t("home.solo.enter")}
+                    </button>
+                    <button
+                      className="secondary-button entry-practice-button"
+                      type="button"
+                      onClick={() => enterSolo("no_guess", "GUIDED_PRACTICE")}
+                    >
+                      {t("home.solo.practice")}
                     </button>
                     <p className="entry-mode-note">
                       {t("home.solo.note")}
@@ -1413,7 +1458,7 @@ export function App() {
                         aria-label={t("duel.roomCodeAria")}
                         className="code-input"
                         inputMode="text"
-                        placeholder="ROOM CODE"
+                        placeholder={t("duel.roomCodePlaceholder")}
                         value={joinCode}
                         onChange={(event) => setJoinCode(normalizeRoomCode(event.target.value))}
                         onKeyDown={(event) => {
@@ -1448,7 +1493,7 @@ export function App() {
                   title={t("duel.copyCode")}
                   onClick={() => {
                     void navigator.clipboard.writeText(roomCode);
-                    setNotice(t("duel.codeCopied"));
+                    setNotice({ id: "duel.codeCopied" });
                   }}
                 >
                   {roomCode || "------"}
@@ -1456,7 +1501,7 @@ export function App() {
               </div>
               <div>
                 <span className="meta-label">{t("duel.format")}</span>
-                <strong>BO3 · ROUND {round}</strong>
+                <strong>{t("duel.formatRound", { round })}</strong>
               </div>
               <div>
                 <span className="meta-label">{t("duel.clock")}</span>
@@ -1464,14 +1509,16 @@ export function App() {
               </div>
               <div>
                 <span className="meta-label">{t("duel.state")}</span>
-                <strong className={`lead-state lead-${lead.toLowerCase()}`}>{lead}</strong>
+                <strong className={`lead-state lead-${lead.toLowerCase()}`}>
+                  {t(lead === "EVEN" ? "duel.state.even" : lead === "LEADING" ? "duel.state.leading" : "duel.state.trailing")}
+                </strong>
               </div>
             </div>
 
             {phase === "LOBBY" ? (
               <div className="lobby-layout">
                 <div className="lobby-main">
-                  <p className="eyebrow">PRIVATE DUEL / {roomCode}</p>
+                  <p className="eyebrow">{t("duel.privateRoom", { room: roomCode })}</p>
                   <h1>{t("duel.lobbyTitle")}</h1>
                   <p>{t("duel.lobbyDescription")}</p>
                   <button
@@ -1481,8 +1528,8 @@ export function App() {
                       void navigator.clipboard
                         .writeText(duelInviteUrl(roomCode))
                         .then(
-                          () => setNotice(t("duel.inviteCopied")),
-                          () => setError(t("duel.inviteCopyFailed")),
+                          () => setNotice({ id: "duel.inviteCopied" }),
+                          () => setError({ id: "duel.inviteCopyFailed" }),
                         );
                     }}
                   >
@@ -1495,13 +1542,13 @@ export function App() {
                         <div className={`seat-card${player ? " occupied" : ""}`} key={seat}>
                           <span className="seat-number">0{seat}</span>
                           <div>
-                            <strong>{player?.displayName ?? "OPEN SEAT"}</strong>
+                            <strong>{player?.displayName ?? t("duel.seat.open")}</strong>
                             <small>
                               {player
                                 ? player.ready
-                                  ? "READY / LOCKED"
-                                  : "CONNECTED / NOT READY"
-                                : "WAITING FOR PLAYER"}
+                                  ? t("duel.seat.ready")
+                                  : t("duel.seat.connected")
+                                : t("duel.seat.waiting")}
                             </small>
                           </div>
                           <i className={player?.ready ? "ready-light active" : "ready-light"} />
@@ -1534,7 +1581,7 @@ export function App() {
                     <span>{t("solo.control.reveal")}</span>
                     <span>{t("solo.control.flag")}</span>
                     <span>{t("solo.control.chord")}</span>
-                    <span>LOCAL {inputLatency === null ? "—" : `${inputLatency.toFixed(1)}ms`}</span>
+                    <span>{t("duel.localLatency", { value: inputLatency === null ? "—" : `${inputLatency.toFixed(1)}ms` })}</span>
                   </div>
                   <CanvasBoard
                     {...(matchActionVisual === undefined
@@ -1550,7 +1597,7 @@ export function App() {
                   />
                   {phase === "COUNTDOWN" && (
                     <div className="countdown-overlay" aria-live="assertive">
-                      <span>ROUND {round}</span>
+                      <span>{t("duel.countdownRound", { round })}</span>
                       <strong>{countdown ?? 3}</strong>
                       <small>{t("duel.synchronizing")}</small>
                     </div>
@@ -1563,10 +1610,10 @@ export function App() {
                       aria-atomic="true"
                     >
                       <span className="panel-kicker">
-                        {phase === "MATCH_RESULT" ? "MATCH COMPLETE" : "ROUND COMPLETE"}
+                        {t(phase === "MATCH_RESULT" ? "duel.result.matchComplete" : "duel.result.roundComplete")}
                       </span>
-                      <h2>{result.title}</h2>
-                      <p>{result.detail}</p>
+                      <h2>{t(result.title.id, result.title.values)}</h2>
+                      <p>{t(result.detail.id, result.detail.values)}</p>
                       <div className="result-actions">
                         {connectionLost ? (
                           <button className="primary-button" type="button" onClick={leaveRoom}>
@@ -1606,7 +1653,7 @@ export function App() {
                     >
                       <div className="racer-title">
                         <span>
-                          <small>{player.playerId === playerId ? "YOU" : "RIVAL"}</small>
+                          <small>{t(player.playerId === playerId ? "duel.player.you" : "duel.player.rival")}</small>
                           <strong>{player.displayName}</strong>
                         </span>
                         <b>{player.score ?? scores[player.playerId] ?? 0}</b>
@@ -1615,8 +1662,8 @@ export function App() {
                         <i style={{ width: `${player.progress ?? 0}%` }} />
                       </div>
                       <div className="progress-caption">
-                        <span>{player.progress ?? 0}% SAFE CELLS</span>
-                        <span>{player.connected ? "ONLINE" : "DROPPED"}</span>
+                        <span>{t("duel.safeProgress", { percent: player.progress ?? 0 })}</span>
+                        <span>{t(player.connected ? "duel.connection.online" : "duel.connection.dropped")}</span>
                       </div>
                     </div>
                   ))}
@@ -1644,13 +1691,13 @@ export function App() {
 
       {(error || notice) && (
         <div className={`toast${error ? " toast-error" : ""}`} role={error ? "alert" : "status"}>
-          <span>{error || notice}</span>
+          <span>{error ? t(error.id, error.values) : notice ? t(notice.id, notice.values) : ""}</span>
           <button
             type="button"
             aria-label={t("duel.closeNotice")}
             onClick={() => {
-              setError("");
-              setNotice("");
+              setError(null);
+              setNotice(null);
             }}
           >
             ×

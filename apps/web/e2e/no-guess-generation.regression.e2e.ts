@@ -22,7 +22,7 @@ test("ISSUE-002 rapid first-click input starts only one no-guess worker", async 
   await page.goto("/");
   await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
   await page.getByRole("button", { name: "无猜模式" }).click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
 
   const board = page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ });
   await board.scrollIntoViewIfNeeded();

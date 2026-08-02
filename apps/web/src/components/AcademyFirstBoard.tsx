@@ -10,8 +10,7 @@ import {
   toggleFlag,
   type GameState,
 } from "@h-minesweeper/game-core";
-import { useLocale } from "../i18n";
-import { academySpecialMessage, type AcademySpecialMessageId } from "./academy-special-messages";
+import { useLocale, type MessageId } from "../i18n";
 
 const FIRST_BOARD_SEEDS = [2, 3, 4, 6, 7] as const;
 
@@ -33,16 +32,16 @@ export function AcademyFirstBoard({
   readonly stageIndex: number;
   readonly onComplete: () => void;
 }) {
-  const { locale, t } = useLocale();
+  const { t } = useLocale();
   const gameRef = useRef(createLessonState(stageIndex));
   const completedRef = useRef(false);
   const [revision, setRevision] = useState(0);
-  const [feedbackId, setFeedbackId] = useState<AcademySpecialMessageId>("firstBoard.start");
+  const [feedbackId, setFeedbackId] = useState<MessageId>("academy.firstBoard.start");
 
   const reset = () => {
     gameRef.current = createLessonState(stageIndex);
     completedRef.current = false;
-    setFeedbackId("firstBoard.start");
+    setFeedbackId("academy.firstBoard.start");
     setRevision((value) => value + 1);
   };
 
@@ -51,17 +50,17 @@ export function AcademyFirstBoard({
   const applyResult = (accepted: boolean, hitMine: boolean) => {
     const game = gameRef.current;
     if (!accepted) {
-      setFeedbackId("firstBoard.unavailable");
+      setFeedbackId("academy.firstBoard.unavailable");
     } else if (hitMine) {
-      setFeedbackId("firstBoard.hitMine");
+      setFeedbackId("academy.firstBoard.hitMine");
     } else if (game.outcome === "WON") {
-      setFeedbackId("firstBoard.complete");
+      setFeedbackId("academy.firstBoard.complete");
       if (!completedRef.current) {
         completedRef.current = true;
         onComplete();
       }
     } else {
-      setFeedbackId("firstBoard.keepGoing");
+      setFeedbackId("academy.firstBoard.keepGoing");
     }
     setRevision((value) => value + 1);
   };
@@ -86,8 +85,8 @@ export function AcademyFirstBoard({
   const game = gameRef.current;
   void revision;
   return <div className="academy-first-board-wrap">
-    <p>{academySpecialMessage(locale, "firstBoard.instructions")}</p>
-    <div className="academy-first-board" role="grid" aria-label={academySpecialMessage(locale, "firstBoard.aria")}>
+    <p>{t("academy.firstBoard.instructions")}</p>
+    <div className="academy-first-board" role="grid" aria-label={t("academy.firstBoard.aria")}>
       {Array.from(game.visibility, (visibility, index) => {
         const row = Math.floor(index / 5) + 1;
         const column = (index % 5) + 1;
@@ -95,8 +94,8 @@ export function AcademyFirstBoard({
         const label = visibility === CELL_REVEALED
           ? t(clue === 0 ? "academy.openBlankCell" : "academy.openNumberCell", { value: clue })
           : visibility === CELL_FLAGGED
-            ? academySpecialMessage(locale, "firstBoard.flagged", { row, column })
-            : academySpecialMessage(locale, "firstBoard.hidden", { row, column });
+            ? t("academy.firstBoard.flagged", { row, column })
+            : t("academy.firstBoard.hidden", { row, column });
         return <button
           type="button"
           role="gridcell"
@@ -110,8 +109,8 @@ export function AcademyFirstBoard({
       })}
     </div>
     <div className={`academy-feedback${game.outcome === "WON" ? " is-success" : ""}`} aria-live="polite">
-      <p>{academySpecialMessage(locale, feedbackId)}</p>
+      <p>{t(feedbackId)}</p>
     </div>
-    {game.outcome === "LOST" && <button className="secondary-button" type="button" onClick={reset}>{academySpecialMessage(locale, "firstBoard.retry")}</button>}
+    {game.outcome === "LOST" && <button className="secondary-button" type="button" onClick={reset}>{t("academy.firstBoard.retry")}</button>}
   </div>;
 }

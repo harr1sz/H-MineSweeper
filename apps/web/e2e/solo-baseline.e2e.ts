@@ -16,12 +16,12 @@ async function enterSoloSetup(page: Page): Promise<void> {
     page.getByRole("button", { name: "单人游戏 · 配置开局" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
-  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
 }
 
 async function enterSolo(page: Page): Promise<void> {
   await enterSoloSetup(page);
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
 }
 
@@ -105,9 +105,23 @@ test("语言切换采用浏览器语言并保留当前模式状态", async ({ pa
   const academyEnglish = page.locator(".home-mode-option").nth(1);
   await expect(academyEnglish).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("heading", { name: "Choose a mode" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => ({
+    title: document.title,
+    description: document.querySelector('meta[name="description"]')?.getAttribute("content"),
+    openGraph: document.querySelector('meta[property="og:description"]')?.getAttribute("content"),
+    twitter: document.querySelector('meta[name="twitter:description"]')?.getAttribute("content"),
+  }))).toEqual({
+    title: "H‑MineSweeper · Solo Training Alpha",
+    description: "H‑MineSweeper offers solo practice with local history, replay analysis, and the Minesweeper Academy.",
+    openGraph: "Solo Minesweeper training with local history, verified replays, and guided practice.",
+    twitter: "Solo Minesweeper training with local history, verified replays, and guided practice.",
+  });
   await page.reload();
   await expect(page.getByRole("heading", { name: "Choose a mode" })).toBeVisible();
   await page.getByRole("button", { name: "Switch to Chinese" }).click();
+  await expect.poll(() => page.evaluate(() =>
+    document.querySelector('meta[property="og:description"]')?.getAttribute("content"),
+  )).toBe("本地单人扫雷训练、可验证复盘与引导练习。");
 });
 
 test("320px 窄屏下语言入口保持可见且不造成横向溢出", async ({ page }) => {
@@ -130,7 +144,7 @@ test("进行中的棋盘切换语言不会重置局面", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Classic Minesweeper" })).toBeVisible();
   await expect(page.getByRole("grid", { name: /^9 by 9 Minesweeper board/ })).toBeVisible();
   await expect(page.getByText("In progress", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Training history and trends" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Solo history and trends" })).toBeVisible();
   await expect.poll(() => page.locator(".solo-shell").innerText()).not.toMatch(/[\u3400-\u9fff]/u);
 });
 
@@ -139,11 +153,11 @@ test("学院和 1v1 开启态使用同一英文 catalog", async ({ page }) => {
   await page.getByRole("button", { name: "切换到英文" }).click();
   await page.locator(".home-mode-option").nth(2).click();
   await expect(page.getByRole("button", { name: "Create 1v1 room" })).toBeVisible();
-  await expect(page.getByText(/Any 1v1 failure leaves professional solo training available/)).toBeVisible();
+  await expect(page.getByText(/If the 1v1 service is unavailable, Solo and the Academy remain available/)).toBeVisible();
   await page.locator(".home-mode-option").nth(1).click();
-  await page.getByRole("button", { name: "Academy · Start the first lesson" }).click();
+  await page.getByRole("button", { name: "Start the first Academy lesson" }).click();
   await expect(page.getByRole("heading", { name: "Minesweeper Academy" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Practice the three real actions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Learn the basic controls" })).toBeVisible();
   await expect.poll(() => page.locator(".academy-shell").innerText()).not.toMatch(/[\u3400-\u9fff]/u);
 });
 
@@ -168,7 +182,9 @@ test("学院使用 3×3 操作预热、单旗杆和理由优先的真实棋盘",
   await expect(page.getByText(/空白格.*安全/)).toBeVisible();
   await page.getByRole("button", { name: "根据数字可以确定是雷的盖住格" }).press("f");
   await page.getByRole("button", { name: "下一步" }).click();
-  await page.getByRole("button", { name: "数字 1，点击快速展开周围格" }).click();
+  await page.getByRole("button", {
+    name: "数字 1，点击后同时打开周围其余未标记的格",
+  }).click();
   await page.getByRole("button", { name: "进入第一道逻辑题" }).click();
 
   await expect(page.locator(".academy-mini-board .academy-cell")).toHaveCount(16);
@@ -245,7 +261,7 @@ test("安全快速展开允许直接揭格，并解释错旗造成的触雷", as
   await page.getByRole("button", { name: "重试这个局面" }).click();
   await retryCells.nth(5).press("f");
   await retryCells.nth(0).click();
-  await expect(page.getByText(/点击已满足的数字安全展开/)).toBeVisible();
+  await expect(page.getByText(/点击已满足的数字，安全打开/)).toBeVisible();
   for (let stageIndex = 1; stageIndex < 5; stageIndex += 1) {
     await page.getByRole("button", { name: "下一题" }).click();
     const stageCells = page.locator(".academy-first-board button");
@@ -259,7 +275,7 @@ test("安全快速展开允许直接揭格，并解释错旗造成的触雷", as
       })!;
     await stageCells.nth(displayFor(5)).press("f");
     await stageCells.nth(displayFor(0)).click();
-    await expect(page.getByText(/点击已满足的数字安全展开/)).toBeVisible();
+    await expect(page.getByText(/点击已满足的数字，安全打开/)).toBeVisible();
   }
   await expect(page.getByText("未见迁移题")).toBeVisible();
 });
@@ -396,7 +412,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .getByRole("group", { name: "棋盘显示方案" })
     .getByRole("button", { name: "高对比" })
     .click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
 
   await expect
@@ -408,7 +424,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .not.toBeNull();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
   await expect(expert).toHaveClass(/is-active/);
   await expect(
     page
@@ -420,7 +436,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
       .getByRole("group", { name: "棋盘显示方案" })
       .getByRole("button", { name: "高对比" }),
   ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(
     page.getByRole("grid", { name: /^30 乘 16 扫雷棋盘/ }),
   ).toBeVisible();
@@ -450,8 +466,8 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
   await expect(page.locator(".solo-history-list article")).toHaveCount(1);
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
   await expect(page.locator(".solo-history-list article")).toHaveCount(1);
 
@@ -460,7 +476,7 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
     .locator(".solo-tabs")
     .getByRole("button", { name: /^高级 30×16/ })
     .click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(
     page.getByRole("button", { name: "当前配置 · 0" }),
   ).toBeVisible();
@@ -504,6 +520,11 @@ test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
   await page.getByRole("button", { name: "上一步" }).click();
   await expect(page.getByText("这是受保护的首击")).toBeVisible();
   await expect(page.locator(".replay-explanation > dl")).not.toContainText(/#\d+|COMPLETE|PARTIAL|CSP_/);
+  await page.locator(".replay-technical-details summary").click();
+  await expect(page.locator(".replay-technical-details")).toContainText("当前可见局面分析完成");
+  await expect(page.locator(".replay-technical-details")).not.toContainText(
+    /COMPLETE|PARTIAL|CONTRADICTION|SINGLE_|SUBSET_|GLOBAL_|CSP_/u,
+  );
   await page.getByRole("button", { name: "展开完整时间线" }).click();
   await expect(page.locator(".replay-timeline li")).toHaveCount(2);
   await expect(page.locator(".replay-timeline")).toContainText("第 1 步");
@@ -586,7 +607,7 @@ test("无猜生成超过五秒后回退，不制造终局记录", async ({ page 
   });
   await enterSoloSetup(page);
   await page.getByRole("button", { name: "无猜模式" }).click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await clickBoardCell(page, 40, 9, 9);
   await expect(page.getByText("生成无猜棋盘")).toBeVisible();
   await expect(
@@ -669,8 +690,8 @@ test("旧版 PB 幂等迁移为独立元数据，坏值可恢复且不进入趋�
   );
   await enterSolo(page);
 
-  await expect(page.getByText(/已保留 1 条旧版 PB 为只读 legacy/)).toBeVisible();
-  await expect(page.getByText(/检测到 1 条损坏的旧版 PB 源值/)).toBeVisible();
+  await expect(page.getByText(/已将 1 条旧版 PB 保留为只读参考/)).toBeVisible();
+  await expect(page.getByText(/检测到 1 条损坏的旧版 PB 数据/)).toBeVisible();
   await page.getByRole("button", { name: "展开历史 · 1" }).click();
   await expect(page.getByText("旧版 PB 参考")).toBeVisible();
   await expect(
@@ -711,8 +732,14 @@ test("旧版 PB 幂等迁移为独立元数据，坏值可恢复且不进入趋�
     });
   });
   expect(firstSnapshot).toMatchObject({
-    version: 3,
-    stores: ["legacy-personal-bests-v1", "solo-replays-v1", "solo-runs-v1"],
+    version: 4,
+    stores: [
+      "legacy-personal-bests-v1",
+      "practice-replays-v1",
+      "practice-runs-v1",
+      "solo-replays-v1",
+      "solo-runs-v1",
+    ],
     runCount: 1,
   });
   expect(firstSnapshot.metadata).toHaveLength(1);
@@ -741,10 +768,10 @@ test("旧版 PB 幂等迁移为独立元数据，坏值可恢复且不进入趋�
   );
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
-  await expect(page.getByText(/已保留 1 条旧版 PB 为只读 legacy/)).toBeVisible();
+  await expect(page.getByText(/已将 1 条旧版 PB 保留为只读参考/)).toBeVisible();
   const secondMetadata = await page.evaluate(async () => {
     return await new Promise<Record<string, unknown>[]>((resolve, reject) => {
       const request = indexedDB.open("h-minesweeper-solo-history-v1");
@@ -790,8 +817,8 @@ test("损坏历史保留原文并从趋势中隔离", async ({ page }) => {
     });
   });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人训练" })).toBeVisible();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(
     page.getByText(/检测到 1 条损坏或未知版本记录/),
   ).toBeVisible();
@@ -825,7 +852,7 @@ test("IndexedDB 不可用时游戏继续且明确标记本局未保存", async (
   await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
   await expect(
     page.locator(".solo-history-save-error").getByText(
-      /IndexedDB.*未保存到历史/,
+      /浏览器存储.*未保存到历史/,
     ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "重试保存" })).toBeVisible();

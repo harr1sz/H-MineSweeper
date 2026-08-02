@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { recordMetric } from "../lib/performance";
+import type { CoachAction } from "../lib/practice-coach";
 
 export type BoardAction = "REVEAL" | "TOGGLE_FLAG" | "CHORD";
 
@@ -29,6 +30,31 @@ export interface BoardActionVisual {
   readonly changedIndexes?: readonly number[];
   readonly accepted?: boolean;
   readonly revealedSafeCount?: number;
+}
+
+/**
+ * Persistent, visible-state-only coach marks. Callers provide proof sources and
+ * the single suggested target; CanvasBoard never derives them from hidden
+ * board truth.
+ */
+export interface BoardCoachOverlay {
+  readonly sourceIndexes?: readonly number[] | undefined;
+  readonly targetIndex?: number | undefined;
+  readonly action?: CoachAction | undefined;
+  readonly autoFlaggedIndexes?: readonly number[] | undefined;
+}
+
+export interface ResolvedBoardCoachOverlay {
+  readonly sourceIndexes: readonly number[];
+  readonly targetIndex: number | null;
+  readonly action: CoachAction | null;
+  readonly autoFlaggedIndexes: readonly number[];
+}
+
+export interface BoardCoachOverlayDrawSummary {
+  readonly sourceCount: number;
+  readonly targetDrawn: boolean;
+  readonly autoFlaggedCount: number;
 }
 
 export interface BoardPalette {
@@ -55,6 +81,7 @@ export interface BoardPalette {
 export interface CanvasBoardProps {
   game: GameState | null;
   revision: number;
+  ariaDescribedBy?: string;
   disabled?: boolean;
   reducedMotion?: boolean;
   showTerminalMines?: boolean;
@@ -62,6 +89,7 @@ export interface CanvasBoardProps {
   boardTheme?: BoardTheme;
   effectsProfile?: BoardEffectsProfile;
   actionVisual?: BoardActionVisual;
+  coachOverlay?: BoardCoachOverlay | undefined;
   onAction: (
     action: BoardAction,
     cellIndex: number,
@@ -83,6 +111,8 @@ const DIRTY_REDRAW_THRESHOLD = 0.15;
 const MAX_ANIMATED_CELLS = 64;
 const MAX_CANVAS_LAYER_PIXELS = 4_000_000;
 const LARGE_BOARD_SURFACE_CELL_THRESHOLD = 2_500;
+const MAX_COACH_SOURCE_MARKERS = 64;
+const MAX_COACH_AUTO_FLAG_MARKERS = 256;
 
 const PALETTES: Readonly<Record<BoardTheme, BoardPalette>> = {
   classic: {
@@ -280,6 +310,61 @@ export function normalizeChangedIndexes(
   return result;
 }
 
+function isCoachAction(value: unknown): value is CoachAction {
+  return value === "REVEAL" || value === "FLAG" || value === "UNFLAG";
+}
+
+/**
+ * Sanitizes coach-provided indexes and bounds overlay work on 10,000-cell
+ * custom boards. When a proof has many sources, the closest clues to the
+ * target are retained deterministically.
+ */
+export function resolveBoardCoachOverlay(
+  overlay: BoardCoachOverlay | undefined,
+  width: number,
+  height: number,
+): ResolvedBoardCoachOverlay {
+  const safeWidth = Number.isSafeInteger(width) && width > 0 ? width : 0;
+  const safeHeight = Number.isSafeInteger(height) && height > 0 ? height : 0;
+  const cellCount = safeWidth * safeHeight;
+  if (!overlay || cellCount <= 0 || !Number.isSafeInteger(cellCount)) {
+    return {
+      sourceIndexes: [],
+      targetIndex: null,
+      action: null,
+      autoFlaggedIndexes: [],
+    };
+  }
+  const targetIndex = Number.isSafeInteger(overlay.targetIndex) &&
+    (overlay.targetIndex as number) >= 0 &&
+    (overlay.targetIndex as number) < cellCount &&
+    isCoachAction(overlay.action)
+    ? overlay.targetIndex as number
+    : null;
+  const action = targetIndex === null ? null : overlay.action as CoachAction;
+  const sourceIndexes = targetIndex === null
+    ? []
+    : normalizeChangedIndexes(overlay.sourceIndexes, cellCount)
+      .filter((index) => index !== targetIndex)
+      .sort((left, right) => {
+        const targetRow = Math.floor(targetIndex / safeWidth);
+        const targetColumn = targetIndex % safeWidth;
+        const leftDistance = Math.abs(Math.floor(left / safeWidth) - targetRow) +
+          Math.abs((left % safeWidth) - targetColumn);
+        const rightDistance = Math.abs(Math.floor(right / safeWidth) - targetRow) +
+          Math.abs((right % safeWidth) - targetColumn);
+        return leftDistance - rightDistance || left - right;
+      })
+      .slice(0, MAX_COACH_SOURCE_MARKERS);
+  const autoFlaggedIndexes = normalizeChangedIndexes(
+    overlay.autoFlaggedIndexes,
+    cellCount,
+  )
+    .sort((left, right) => left - right)
+    .slice(0, MAX_COACH_AUTO_FLAG_MARKERS);
+  return { sourceIndexes, targetIndex, action, autoFlaggedIndexes };
+}
+
 export function shouldRedrawWholeBoard(
   dirtyCellCount: number,
   cellCount: number,
@@ -352,6 +437,7 @@ function drawFlagMarker(
   centerY: number,
   metrics: BoardMarkMetrics,
   palette: BoardPalette,
+  flagColor = palette.flag,
 ) {
   const size = metrics.iconSize;
   const poleX = centerX - size * 0.16;
@@ -370,7 +456,7 @@ function drawFlagMarker(
   context.strokeStyle = palette.focusGuard;
   context.lineWidth = metrics.iconLineWidth + 2;
   context.stroke();
-  context.strokeStyle = palette.flag;
+  context.strokeStyle = flagColor;
   context.lineWidth = metrics.iconLineWidth;
   context.stroke();
 
@@ -379,7 +465,7 @@ function drawFlagMarker(
   context.lineTo(centerX + size * 0.34, centerY - size * 0.21);
   context.lineTo(poleX + metrics.iconLineWidth * 0.35, centerY + size * 0.02);
   context.closePath();
-  context.fillStyle = palette.flag;
+  context.fillStyle = flagColor;
   context.fill();
   context.strokeStyle = palette.focusGuard;
   context.lineWidth = Math.max(1, metrics.iconLineWidth * 0.55);
@@ -488,9 +574,163 @@ function drawCorrectFlagMarker(
   context.restore();
 }
 
+function coachActionColor(action: CoachAction, palette: BoardPalette): string {
+  if (action === "FLAG") return palette.flag;
+  if (action === "UNFLAG") return palette.numberColors[5] ?? "#ffc176";
+  return palette.numberColors[2] ?? "#52dfb3";
+}
+
+function drawCoachActionBadge(
+  context: CanvasRenderingContext2D,
+  action: CoachAction,
+  x: number,
+  y: number,
+  cellSize: number,
+  color: string,
+  palette: BoardPalette,
+): void {
+  const radius = clamp(cellSize * 0.16, 2.8, 5.2);
+  const centerX = x + cellSize - radius - 2.2;
+  const centerY = y + radius + 2.2;
+  context.beginPath();
+  context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  context.fillStyle = color;
+  context.fill();
+  context.strokeStyle = palette.focusGuard;
+  context.lineWidth = Math.max(1, cellSize * 0.045);
+  context.stroke();
+
+  context.strokeStyle = palette.focusGuard;
+  context.fillStyle = palette.focusGuard;
+  context.lineWidth = Math.max(1, cellSize * 0.055);
+  context.lineCap = "round";
+  if (action === "REVEAL") {
+    context.beginPath();
+    context.arc(centerX, centerY, Math.max(1, radius * 0.3), 0, Math.PI * 2);
+    context.fill();
+    return;
+  }
+  if (action === "FLAG") {
+    context.beginPath();
+    context.moveTo(centerX - radius * 0.3, centerY + radius * 0.45);
+    context.lineTo(centerX - radius * 0.3, centerY - radius * 0.48);
+    context.lineTo(centerX + radius * 0.45, centerY - radius * 0.17);
+    context.lineTo(centerX - radius * 0.3, centerY + radius * 0.05);
+    context.closePath();
+    context.fill();
+    return;
+  }
+  context.beginPath();
+  context.moveTo(centerX - radius * 0.34, centerY - radius * 0.34);
+  context.lineTo(centerX + radius * 0.34, centerY + radius * 0.34);
+  context.moveTo(centerX + radius * 0.34, centerY - radius * 0.34);
+  context.lineTo(centerX - radius * 0.34, centerY + radius * 0.34);
+  context.stroke();
+}
+
+function drawCoachAutoFlagMarker(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  cellSize: number,
+  palette: BoardPalette,
+): void {
+  const radius = clamp(cellSize * 0.12, 2.2, 4);
+  const centerX = x + cellSize - radius - 2;
+  const centerY = y + cellSize - radius - 2;
+  context.beginPath();
+  context.moveTo(centerX, centerY - radius);
+  context.lineTo(centerX + radius, centerY);
+  context.lineTo(centerX, centerY + radius);
+  context.lineTo(centerX - radius, centerY);
+  context.closePath();
+  context.fillStyle = palette.focus;
+  context.fill();
+  context.strokeStyle = palette.focusGuard;
+  context.lineWidth = Math.max(1, cellSize * 0.04);
+  context.stroke();
+}
+
+/**
+ * Draws static coach marks on the dedicated coach layer. It intentionally accepts no
+ * GameState, so the renderer cannot inspect a mine map or hidden clue value.
+ */
+export function drawBoardCoachOverlay(
+  context: CanvasRenderingContext2D,
+  overlay: BoardCoachOverlay | undefined,
+  width: number,
+  height: number,
+  cellSize: number,
+  palette: BoardPalette,
+): BoardCoachOverlayDrawSummary {
+  const resolved = resolveBoardCoachOverlay(overlay, width, height);
+  const safeCellSize = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : 0;
+  if (safeCellSize === 0) {
+    return { sourceCount: 0, targetDrawn: false, autoFlaggedCount: 0 };
+  }
+  context.save();
+  context.lineJoin = "round";
+  const sourceColor = palette.numberColors[1] ?? "#74b3ff";
+  context.setLineDash([
+    Math.max(2, safeCellSize * 0.18),
+    Math.max(1.5, safeCellSize * 0.12),
+  ]);
+  for (const index of resolved.sourceIndexes) {
+    const x = (index % width) * safeCellSize;
+    const y = Math.floor(index / width) * safeCellSize;
+    context.globalAlpha = 0.1;
+    context.fillStyle = sourceColor;
+    context.fillRect(x + 2, y + 2, safeCellSize - 4, safeCellSize - 4);
+    context.globalAlpha = 0.88;
+    context.strokeStyle = sourceColor;
+    context.lineWidth = Math.max(1.2, safeCellSize * 0.055);
+    context.strokeRect(x + 2.5, y + 2.5, safeCellSize - 5, safeCellSize - 5);
+  }
+
+  context.setLineDash([]);
+  context.globalAlpha = 1;
+  for (const index of resolved.autoFlaggedIndexes) {
+    const x = (index % width) * safeCellSize;
+    const y = Math.floor(index / width) * safeCellSize;
+    drawCoachAutoFlagMarker(context, x, y, safeCellSize, palette);
+  }
+
+  if (resolved.targetIndex !== null && resolved.action !== null) {
+    const x = (resolved.targetIndex % width) * safeCellSize;
+    const y = Math.floor(resolved.targetIndex / width) * safeCellSize;
+    const color = coachActionColor(resolved.action, palette);
+    context.globalAlpha = 0.14;
+    context.fillStyle = color;
+    context.fillRect(x + 1.5, y + 1.5, safeCellSize - 3, safeCellSize - 3);
+    context.globalAlpha = 1;
+    context.strokeStyle = palette.focusGuard;
+    context.lineWidth = Math.max(3.5, safeCellSize * 0.16);
+    context.strokeRect(x + 2, y + 2, safeCellSize - 4, safeCellSize - 4);
+    context.strokeStyle = color;
+    context.lineWidth = Math.max(2, safeCellSize * 0.09);
+    context.strokeRect(x + 2.5, y + 2.5, safeCellSize - 5, safeCellSize - 5);
+    drawCoachActionBadge(
+      context,
+      resolved.action,
+      x,
+      y,
+      safeCellSize,
+      color,
+      palette,
+    );
+  }
+  context.restore();
+  return {
+    sourceCount: resolved.sourceIndexes.length,
+    targetDrawn: resolved.targetIndex !== null,
+    autoFlaggedCount: resolved.autoFlaggedIndexes.length,
+  };
+}
+
 export function CanvasBoard({
   game,
   revision,
+  ariaDescribedBy,
   disabled = false,
   reducedMotion = false,
   showTerminalMines = false,
@@ -498,6 +738,7 @@ export function CanvasBoard({
   boardTheme = "black-gold",
   effectsProfile = "full",
   actionVisual,
+  coachOverlay,
   onAction,
   onInputLatency,
 }: CanvasBoardProps) {
@@ -505,6 +746,7 @@ export function CanvasBoard({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const coachCanvasRef = useRef<HTMLCanvasElement>(null);
   const actionRef = useRef(onAction);
   const latencyRef = useRef(onInputLatency);
   const pendingActionPaintsRef = useRef<number[]>([]);
@@ -674,7 +916,8 @@ export function CanvasBoard({
     const drawStartedAt = performance.now();
     const canvas = canvasRef.current;
     const overlayCanvas = overlayCanvasRef.current;
-    if (!canvas || !overlayCanvas) return;
+    const coachCanvas = coachCanvasRef.current;
+    if (!canvas || !overlayCanvas || (coachOverlay !== undefined && !coachCanvas)) return;
 
     const cssWidth = width * cellSize;
     const cssHeight = height * cellSize;
@@ -703,11 +946,26 @@ export function CanvasBoard({
       overlayCanvas.style.height = `${cssHeight}px`;
       resized = true;
     }
+    if (
+      coachCanvas &&
+      (coachCanvas.width !== pixelWidth || coachCanvas.height !== pixelHeight)
+    ) {
+      coachCanvas.width = pixelWidth;
+      coachCanvas.height = pixelHeight;
+      coachCanvas.style.width = `${cssWidth}px`;
+      coachCanvas.style.height = `${cssHeight}px`;
+      resized = true;
+    }
 
     const context = canvas.getContext("2d", { alpha: false });
     const overlayContext = overlayCanvas.getContext("2d");
-    if (!context || !overlayContext) return;
+    const coachContext = coachCanvas?.getContext("2d") ?? null;
+    if (!context || !overlayContext || (coachCanvas && !coachContext)) return;
     const markMetrics = resolveBoardMarkMetrics(cellSize);
+    const autoFlaggedIndexSet = new Set(normalizeChangedIndexes(
+      coachOverlay?.autoFlaggedIndexes,
+      cellCount,
+    ));
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.textAlign = "center";
     context.textBaseline = "middle";
@@ -796,7 +1054,14 @@ export function CanvasBoard({
       } else if (correctFlag) {
         drawCorrectFlagMarker(context, centerX, centerY, markMetrics, palette);
       } else if (visibility === FLAGGED) {
-        drawFlagMarker(context, centerX, centerY, markMetrics, palette);
+        drawFlagMarker(
+          context,
+          centerX,
+          centerY,
+          markMetrics,
+          palette,
+          autoFlaggedIndexSet.has(index) ? palette.focus : palette.flag,
+        );
       } else if (visibility === REVEALED && game) {
         if (hasMine) {
           drawMineMarker(context, centerX, centerY, markMetrics, palette);
@@ -1073,6 +1338,21 @@ export function CanvasBoard({
       );
     }
 
+    if (coachContext) {
+      const coachStartedAt = performance.now();
+      coachContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+      coachContext.clearRect(0, 0, cssWidth, cssHeight);
+      drawBoardCoachOverlay(
+        coachContext,
+        coachOverlay,
+        width,
+        height,
+        cellSize,
+        palette,
+      );
+      recordMetric("boardCoachOverlayDrawMs", performance.now() - coachStartedAt);
+    }
+
     previousGameRef.current = game;
     previousRevisionRef.current = revision;
     previousFocusRef.current = focusIndex;
@@ -1115,6 +1395,7 @@ export function CanvasBoard({
     boardTheme,
     cellSize,
     cellCount,
+    coachOverlay,
     effectiveEffectsProfile,
     focusIndex,
     game,
@@ -1473,6 +1754,7 @@ export function CanvasBoard({
             role="grid"
             tabIndex={0}
             aria-label={t("board.aria", { width, height, cell: focusedCellLabel })}
+            aria-describedby={ariaDescribedBy}
             onContextMenu={(event) => event.preventDefault()}
             onDoubleClick={handleDoubleClick}
             onKeyDown={handleKeyDown}
@@ -1520,6 +1802,13 @@ export function CanvasBoard({
             }}
             onPointerUp={handlePointerUp}
           />
+          {coachOverlay !== undefined && (
+            <canvas
+              ref={coachCanvasRef}
+              aria-hidden="true"
+              className="board-coach-canvas"
+            />
+          )}
           <canvas
             ref={overlayCanvasRef}
             aria-hidden="true"

@@ -1212,11 +1212,13 @@ input:focus {
 }
 
 .board-canvas-stack .mine-board,
+.board-coach-canvas,
 .board-effects-canvas {
   position: absolute;
   inset: 0;
 }
 
+.board-coach-canvas,
 .board-effects-canvas {
   display: block;
   border: 1px solid transparent;

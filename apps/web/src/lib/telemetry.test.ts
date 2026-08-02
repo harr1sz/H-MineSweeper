@@ -377,6 +377,74 @@ describe("TelemetryClient", () => {
         elapsedMs: Number.POSITIVE_INFINITY,
       }),
     ).toBeNull();
+    expect(
+      sanitizeTelemetryProperties("practice_run_started", {
+        preset: "beginner",
+        seed: "must-not-leave-device",
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryProperties("practice_hint_shown", {
+        trigger: "REQUEST",
+        status: "READY",
+        action: "FLAG",
+        proof: "must-stay-local",
+      }),
+    ).toBeNull();
+  });
+
+  it("allows bounded practice metadata without replay or board truth", () => {
+    expect(
+      sanitizeTelemetryProperties("practice_hint_shown", {
+        trigger: "REQUEST",
+        status: "READY",
+        action: "FLAG",
+      }),
+    ).toEqual({
+      trigger: "REQUEST",
+      status: "READY",
+      action: "FLAG",
+    });
+    expect(
+      sanitizeTelemetryProperties("practice_hint_shown", {
+        trigger: "REQUEST",
+        status: "READY",
+        action: "FLAG",
+        rule: "SINGLE_MINE",
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryProperties("practice_hint_shown", {
+        trigger: "AUTO_MARK",
+        status: "READY",
+        action: "FLAG",
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryProperties("practice_assist_applied", {
+        trigger: "REQUEST",
+        action: "FLAG",
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryProperties("practice_run_terminal", {
+        outcome: "ABANDONED",
+        historyFailureReason: "UNKNOWN",
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryProperties("practice_no_guess_generation_finished", {
+        preset: "beginner",
+        success: true,
+        attempts: 3,
+        elapsedMs: 42,
+      }),
+    ).toEqual({
+      preset: "beginner",
+      success: true,
+      attempts: 3,
+      elapsedMs: 42,
+    });
   });
 
   it("clears the pending queue immediately when the user opts out", () => {

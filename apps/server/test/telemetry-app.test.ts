@@ -373,6 +373,138 @@ describe("public telemetry API", () => {
     ).toBe(0);
   });
 
+  it("ingests every practice event without blocking a mixed queued batch", async () => {
+    const app = telemetryApp();
+    const { cookie } = await createTelemetrySession(app);
+    expect((await setPreference(app, cookie, true)).statusCode).toBe(202);
+
+    const practiceEvents = [
+      {
+        ...event("guided_practice_mode_event"),
+        eventName: "mode_selected",
+        properties: {
+          mode: "guided_practice",
+          source: "home",
+        },
+      },
+      {
+        ...event("practice_started_event"),
+        eventName: "practice_run_started",
+        properties: {
+          trainingSessionId: "practice-session-123456",
+          preset: "beginner",
+          generationMode: "no_guess",
+          width: 9,
+          height: 9,
+          mines: 10,
+          assistMode: "COACH",
+        },
+      },
+      {
+        ...event("practice_hint_event"),
+        eventName: "practice_hint_shown",
+        properties: {
+          trigger: "IDLE",
+          status: "READY",
+          action: "FLAG",
+        },
+      },
+      {
+        ...event("practice_assist_event"),
+        eventName: "practice_assist_applied",
+        properties: {
+          trigger: "AUTO_MARK",
+          action: "FLAG",
+        },
+      },
+      {
+        ...event("practice_terminal_event"),
+        eventName: "practice_run_terminal",
+        properties: {
+          trainingSessionId: "practice-session-123456",
+          preset: "beginner",
+          generationMode: "no_guess",
+          outcome: "WON",
+          elapsedMs: 12_345.67,
+          playerActions: 8,
+          hintsShown: 2,
+          hintsRequested: 1,
+          autoFlags: 3,
+          demonstratedActions: 0,
+          historySaved: true,
+          historyFailureReason: null,
+        },
+      },
+      {
+        ...event("practice_generation_event"),
+        eventName: "practice_no_guess_generation_finished",
+        properties: {
+          preset: "beginner",
+          success: false,
+          attempts: 0,
+          elapsedMs: 5_001.25,
+          failureReason: "TIME_LIMIT",
+        },
+      },
+      event("standard_after_practice_event"),
+    ];
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/telemetry/batch",
+      headers: { cookie },
+      payload: {
+        deletionToken: DELETION_TOKEN,
+        events: practiceEvents,
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(202);
+    expect(response.json()).toEqual({
+      accepted: practiceEvents.length,
+      duplicates: 0,
+      discarded: 0,
+      deletionEpoch: 0,
+      deletedBefore: null,
+    });
+    expect(
+      getServerServices(app).telemetryStore.status().rawTelemetryEvents,
+    ).toBe(practiceEvents.length);
+  });
+
+  it("rejects practice values borrowed from a different event contract", async () => {
+    const app = telemetryApp();
+    const { cookie } = await createTelemetrySession(app);
+    expect((await setPreference(app, cookie, true)).statusCode).toBe(202);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/telemetry/batch",
+      headers: { cookie },
+      payload: {
+        deletionToken: DELETION_TOKEN,
+        events: [
+          {
+            ...event("invalid_practice_hint_event"),
+            eventName: "practice_hint_shown",
+            properties: {
+              trigger: "AUTO_MARK",
+              status: "READY",
+              action: "FLAG",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "INVALID_TELEMETRY_PROPERTIES",
+    });
+    expect(
+      getServerServices(app).telemetryStore.status().rawTelemetryEvents,
+    ).toBe(0);
+  });
+
   it("keeps a deletion tombstone so a stale tab cannot resurrect queued raw events", async () => {
     const app = telemetryApp();
     const { cookie } = await createTelemetrySession(app);

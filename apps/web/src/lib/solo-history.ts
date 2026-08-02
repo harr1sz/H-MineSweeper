@@ -35,11 +35,19 @@ export const SOLO_REPLAY_MAX_ACTIONS = 20_000;
 export const SOLO_REPLAY_MAX_BYTES = 2 * 1024 * 1024;
 export const SOLO_HISTORY_IMPORT_MAX_BYTES = 64 * 1024 * 1024;
 
-const DATABASE_NAME = "h-minesweeper-solo-history-v1";
-const DATABASE_VERSION = 3;
-const RUN_STORE_NAME = "solo-runs-v1";
-const REPLAY_STORE_NAME = "solo-replays-v1";
-const LEGACY_PERSONAL_BEST_STORE_NAME = "legacy-personal-bests-v1";
+export const SOLO_HISTORY_DATABASE_NAME = "h-minesweeper-solo-history-v1";
+export const SOLO_HISTORY_DATABASE_VERSION = 4;
+export const SOLO_RUN_STORE_NAME = "solo-runs-v1";
+export const SOLO_REPLAY_STORE_NAME = "solo-replays-v1";
+export const SOLO_LEGACY_PERSONAL_BEST_STORE_NAME = "legacy-personal-bests-v1";
+export const PRACTICE_RUN_STORE_NAME = "practice-runs-v1";
+export const PRACTICE_REPLAY_STORE_NAME = "practice-replays-v1";
+
+const DATABASE_NAME = SOLO_HISTORY_DATABASE_NAME;
+const DATABASE_VERSION = SOLO_HISTORY_DATABASE_VERSION;
+const RUN_STORE_NAME = SOLO_RUN_STORE_NAME;
+const REPLAY_STORE_NAME = SOLO_REPLAY_STORE_NAME;
+const LEGACY_PERSONAL_BEST_STORE_NAME = SOLO_LEGACY_PERSONAL_BEST_STORE_NAME;
 
 export type SoloRunOutcome = "WON" | "LOST";
 
@@ -1539,7 +1547,7 @@ function transactionResult<T>(
   });
 }
 
-function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
+export function openSoloHistoryDatabase(factory: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = factory.open(DATABASE_NAME, DATABASE_VERSION);
     request.addEventListener(
@@ -1566,6 +1574,17 @@ function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
             { keyPath: "metadataId" },
           );
           store.createIndex("sourceKey", "source.key", { unique: true });
+        }
+        if (!request.result.objectStoreNames.contains(PRACTICE_RUN_STORE_NAME)) {
+          const store = request.result.createObjectStore(PRACTICE_RUN_STORE_NAME, {
+            keyPath: "recordId",
+          });
+          store.createIndex("completedAt", "completedAt");
+        }
+        if (!request.result.objectStoreNames.contains(PRACTICE_REPLAY_STORE_NAME)) {
+          request.result.createObjectStore(PRACTICE_REPLAY_STORE_NAME, {
+            keyPath: "recordId",
+          });
         }
       },
       { once: true },
@@ -1703,7 +1722,7 @@ export function createIndexedDbSoloHistoryStore(
         ),
       );
     }
-    databasePromise ??= openDatabase(factory).catch((error: unknown) => {
+    databasePromise ??= openSoloHistoryDatabase(factory).catch((error: unknown) => {
       databasePromise = undefined;
       throw error;
     });

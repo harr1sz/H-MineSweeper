@@ -5,6 +5,7 @@ import {
   analyzeAcademyExercise,
   createEmptyAcademyProgress,
   evaluateAcademyAnswers,
+  formatAcademyProofTrace,
   getChapterLearningState,
   isAcademyCourseComplete,
   isExerciseMastered,
@@ -55,6 +56,33 @@ describe("academy content", () => {
       expect(proof.proofHash).toHaveLength(8);
       expect(proof.stateHash).toMatch(/^[0-9a-f]{8}$/);
     }
+  });
+
+  it("formats English proof traces with English punctuation and count grammar", () => {
+    const exercise = ACADEMY_EXERCISES.find(({ id }) => id === "c0-all-mine")!;
+    const trace = formatAcademyProofTrace(
+      exercise,
+      analyzeAcademyExercise(exercise),
+      "en-US",
+    );
+    expect(trace).not.toMatch(/[，。；：！？]/u);
+    expect(trace).not.toContain("1 mines");
+    expect(trace).not.toContain("1 covered cells");
+  });
+
+  it("explains an unresolved H6 board without leaving a broken conclusion", () => {
+    const exercise = ACADEMY_EXERCISES.find(
+      ({ id }) => id === "practice-review-clinic",
+    )!;
+    const trace = formatAcademyProofTrace(
+      exercise,
+      analyzeAcademyExercise(exercise),
+      "en-US",
+    );
+    expect(trace).toContain(
+      "No individual covered cell is determined in every valid layout.",
+    );
+    expect(trace).not.toMatch(/;\s*\./u);
   });
 
   it("teaches the canonical closed-edge 1-2-1 result", () => {

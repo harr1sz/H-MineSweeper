@@ -31,7 +31,7 @@ describe("solo preferences", () => {
     saveSoloPreferences(PREFERENCES, storage);
     expect(loadSoloPreferences(storage)).toEqual({
       preferences: PREFERENCES,
-      error: null,
+      errorCode: null,
     });
   });
 
@@ -40,7 +40,7 @@ describe("solo preferences", () => {
       getItem: () => "{not-json",
     });
     expect(result.preferences).toBeNull();
-    expect(result.error).toContain("损坏");
+    expect(result.errorCode).toBe("CORRUPT_DATA");
   });
 
   it("surfaces storage write failures", () => {
@@ -50,7 +50,7 @@ describe("solo preferences", () => {
           throw new Error("quota");
         },
       }),
-    ).toThrow("单人偏好未能保存");
+    ).toThrow("SOLO_PREFERENCES_SAVE_FAILED");
   });
 
   it("lets an explicit route generation mode override the stored mode", () => {

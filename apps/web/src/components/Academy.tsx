@@ -35,6 +35,17 @@ interface AcademyProps {
 
 type AcademyView = "primer" | "map" | "lesson" | "growth" | "complete";
 type AcademySessionMode = "course" | "practice" | "coach" | "diagnostic";
+type AcademyFeedback =
+  | { readonly kind: "MESSAGE"; readonly id: MessageId }
+  | { readonly kind: "EMPTY" }
+  | { readonly kind: "CORRECT_PROOF" }
+  | { readonly kind: "HINT"; readonly level: number }
+  | { readonly kind: "H7" }
+  | {
+    readonly kind: "WRONG";
+    readonly reason: "EXTRA" | "MISSING" | "SHOULD_MINE" | "SHOULD_SAFE" | "UNPROVEN";
+    readonly cellIndex?: number;
+  };
 const ACADEMY_PRIMER_KEY = "hms-academy-primer-v1";
 
 function AcademyFlagIcon() {
@@ -109,15 +120,16 @@ export function Academy({
   const [answers, setAnswers] = useState<Record<number, AcademyAnswer>>({});
   const [showExplanationSources, setShowExplanationSources] = useState(false);
   const [hintLevel, setHintLevel] = useState(0);
-  const [feedback, setFeedback] = useState(
-    t("academy.instructionDetailed"),
-  );
+  const [feedback, setFeedback] = useState<AcademyFeedback>({
+    kind: "MESSAGE",
+    id: "academy.instructionDetailed",
+  });
   const [solved, setSolved] = useState(false);
   const [logicStreak, setLogicStreak] = useState(0);
   const [primerStep, setPrimerStep] = useState(0);
   const [primerSolved, setPrimerSolved] = useState(false);
-  const [primerFeedback, setPrimerFeedback] = useState(
-    t("academy.primer.start"),
+  const [primerFeedbackId, setPrimerFeedbackId] = useState<MessageId>(
+    "academy.primer.start",
   );
   const [returnSoloMode, setReturnSoloMode] = useState<SoloGenerationMode>("classic");
   const [reviewContext, setReviewContext] = useState<{ width: number; height: number; mines: number; verdict: string } | null>(null);
@@ -149,6 +161,36 @@ export function Academy({
     () => academyExerciseCopy(exercise, locale),
     [exercise, locale],
   );
+  const feedbackText = useMemo(() => {
+    if (feedback.kind === "EMPTY") return "";
+    if (feedback.kind === "MESSAGE") return t(feedback.id);
+    if (feedback.kind === "CORRECT_PROOF") {
+      return `${t("academy.correct")} ${exerciseCopy.proof}`;
+    }
+    if (feedback.kind === "H7") {
+      return `${t("academy.h7")} ${exerciseCopy.proof}`;
+    }
+    if (feedback.kind === "HINT") {
+      return feedback.level === 6
+        ? formatAcademyProofTrace(exercise, proofAnalysis, locale)
+        : exerciseCopy.hints[feedback.level - 1] ?? exerciseCopy.proof;
+    }
+    if (feedback.reason === "EXTRA") return t("academy.wrongExtra");
+    if (feedback.reason === "MISSING") return t("academy.wrongMissing");
+    const cellIndex = feedback.cellIndex;
+    if (cellIndex === undefined) return t("academy.wrongExtra");
+    const coordinate = t("academy.cellCoordinate", {
+      row: Math.floor(cellIndex / exercise.width) + 1,
+      column: (cellIndex % exercise.width) + 1,
+    });
+    if (feedback.reason === "SHOULD_MINE") {
+      return t("academy.wrongShouldMine", { coordinate, reason: exerciseCopy.proof });
+    }
+    if (feedback.reason === "SHOULD_SAFE") {
+      return t("academy.wrongShouldSafe", { coordinate, reason: exerciseCopy.proof });
+    }
+    return t("academy.wrongUnproven", { coordinate });
+  }, [exercise, exerciseCopy, feedback, locale, proofAnalysis, t]);
   const isCourseComplete = LEARNING_MODULES.every(({ conceptId }) => progressV3.skills[conceptId] === "MASTERED");
   const canShowCourseSummary = isCourseComplete && activeConceptId === LEARNING_MODULES.at(-1)?.conceptId && moduleStageIndex === 4;
   const isModuleEnd = activeScenario?.stage === "CHECKPOINT";
@@ -168,42 +210,6 @@ export function Academy({
     },
     [],
   );
-
-  useEffect(() => {
-    if (primerSolved) {
-      setPrimerFeedback(t(primerStep === 0
-        ? "academy.primer.revealSuccess"
-        : primerStep === 1
-          ? "academy.primer.flagSuccess"
-          : primerStep === 3
-            ? "academy.primer.independentSuccess"
-          : "academy.primer.expandSuccess"));
-    } else {
-      setPrimerFeedback(t(primerStep === 0
-        ? "academy.primer.start"
-        : primerStep === 1
-          ? "academy.primer.flagInstruction"
-          : primerStep === 2
-            ? "academy.primer.chordInstruction"
-            : primerStep === 3
-              ? "academy.primer.independentInstruction"
-              : "academy.primer.checkpointInstruction"));
-    }
-    if (solved) {
-      setFeedback(`${t("academy.correct")} ${exerciseCopy.proof}`);
-    } else if (hintLevel === 7) {
-      setFeedback(`${t("academy.h7")} ${exerciseCopy.proof}`);
-    } else if (hintLevel === 6) {
-      setFeedback(formatAcademyProofTrace(exercise, proofAnalysis, locale));
-    } else if (hintLevel > 0) {
-      setFeedback(exerciseCopy.hints[hintLevel - 1] ?? exerciseCopy.proof);
-    } else {
-      setFeedback(t("academy.instruction"));
-    }
-    // Re-render existing instructional state in the selected locale without
-    // resetting answers, progress, hints, or the active exercise.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
 
   useEffect(() => {
     const prefix = "#/academy/practice/";
@@ -252,7 +258,7 @@ export function Academy({
     setCheckpointFailed(false);
     setHintLevel(0);
     setSolved(false);
-    setFeedback(t("academy.instruction"));
+    setFeedback({ kind: "MESSAGE", id: "academy.instruction" });
     setView("lesson");
   };
 
@@ -273,9 +279,9 @@ export function Academy({
     openExercise(exerciseForScenario(scenario), "course");
   };
 
-  const solvePrimerStep = (message: string) => {
+  const solvePrimerStep = (messageId: MessageId) => {
     setPrimerSolved(true);
-    setPrimerFeedback(message);
+    setPrimerFeedbackId(messageId);
   };
 
   const continuePrimer = () => {
@@ -289,14 +295,14 @@ export function Academy({
       const nextStep = primerStep + 1;
       setPrimerStep(nextStep);
       setPrimerSolved(false);
-      setPrimerFeedback(
+      setPrimerFeedbackId(
         nextStep === 1
-          ? t("academy.primer.flagInstruction")
+          ? "academy.primer.flagInstruction"
           : nextStep === 2
-            ? t("academy.primer.chordInstruction")
+            ? "academy.primer.chordInstruction"
             : nextStep === 3
-              ? t("academy.primer.independentInstruction")
-              : t("academy.primer.checkpointInstruction"),
+              ? "academy.primer.independentInstruction"
+              : "academy.primer.checkpointInstruction",
       );
       return;
     }
@@ -332,12 +338,12 @@ export function Academy({
     setActiveConceptId(module.conceptId);
     setModuleStageIndex(index);
     openExercise(exerciseForScenario(scenario), "practice");
-    setFeedback(t("academy.practiceIntro"));
+    setFeedback({ kind: "MESSAGE", id: "academy.practiceIntro" });
   };
 
   const openCoach = () => {
     openContinue();
-    setFeedback(t("academy.coachIntro"));
+    setFeedback({ kind: "MESSAGE", id: "academy.coachIntro" });
   };
 
   const openDiagnostic = () => {
@@ -348,7 +354,7 @@ export function Academy({
     setActiveConceptId(module.conceptId);
     setModuleStageIndex(4);
     openExercise(exerciseForScenario(scenario), "diagnostic");
-    setFeedback(t("academy.diagnosticIntro"));
+    setFeedback({ kind: "MESSAGE", id: "academy.diagnosticIntro" });
   };
 
   const toggleAnswer = (index: number) => {
@@ -361,12 +367,12 @@ export function Academy({
       }
       return { ...current, [index]: answerMode };
     });
-    setFeedback("");
+    setFeedback({ kind: "EMPTY" });
   };
 
   const checkAnswer = () => {
     if (Object.keys(answers).length === 0) {
-      setFeedback(t("academy.needTarget"));
+      setFeedback({ kind: "MESSAGE", id: "academy.needTarget" });
       return;
     }
     const evaluation = evaluateAcademyAnswers(exercise, answers);
@@ -394,39 +400,28 @@ export function Academy({
       setCheckpointFailed(false);
       setLogicStreak((current) => (hintLevel === 0 ? current + 1 : 0));
       setSolved(true);
-      setFeedback(
-        `${t("academy.correct")} ${exerciseCopy.proof}`,
-      );
+      setFeedback({ kind: "CORRECT_PROOF" });
       return;
     }
     setCheckpointFailed(activeScenario?.stage === "CHECKPOINT");
     setLogicStreak(0);
     const firstWrongTarget = evaluation.wrongTargets[0];
-    const wrongCoordinate = firstWrongTarget === undefined
-      ? ""
-      : t("academy.cellCoordinate", {
-        row: Math.floor(firstWrongTarget / exercise.width) + 1,
-        column: (firstWrongTarget % exercise.width) + 1,
-      });
-    const wrongTargetFeedback = firstWrongTarget === undefined
-      ? t("academy.wrongExtra")
-      : proofAnalysis.mineTargets.includes(firstWrongTarget)
-        ? t("academy.wrongShouldMine", { coordinate: wrongCoordinate, reason: exerciseCopy.proof })
-        : proofAnalysis.safeTargets.includes(firstWrongTarget)
-          ? t("academy.wrongShouldSafe", { coordinate: wrongCoordinate, reason: exerciseCopy.proof })
-          : t("academy.wrongUnproven", { coordinate: wrongCoordinate });
-    setFeedback(
-      evaluation.wrongTargets.length > 0
-        ? wrongTargetFeedback
-        : t("academy.wrongMissing"),
-    );
+    setFeedback(evaluation.wrongTargets.length === 0
+      ? { kind: "WRONG", reason: "MISSING" }
+      : firstWrongTarget === undefined
+        ? { kind: "WRONG", reason: "EXTRA" }
+        : proofAnalysis.mineTargets.includes(firstWrongTarget)
+          ? { kind: "WRONG", reason: "SHOULD_MINE", cellIndex: firstWrongTarget }
+          : proofAnalysis.safeTargets.includes(firstWrongTarget)
+            ? { kind: "WRONG", reason: "SHOULD_SAFE", cellIndex: firstWrongTarget }
+            : { kind: "WRONG", reason: "UNPROVEN", cellIndex: firstWrongTarget });
   };
 
   const completeFirstBoard = () => {
     if (!activeScenario || solved) return;
     persistV3(recordAcademyScenarioResult(progressV3, activeScenario, true, hintLevel));
     setSolved(true);
-    setFeedback(t("academy.correct"));
+    setFeedback({ kind: "MESSAGE", id: "academy.correct" });
   };
 
   const requestHint = () => {
@@ -436,12 +431,7 @@ export function Academy({
     setHintLevel(nextLevel);
     if (nextLevel >= 4) setShowExplanationSources(true);
     if (activeScenario) persistV3(recordAcademyHintV3(progressV3, activeScenario.id, nextLevel));
-    const hint = exerciseCopy.hints[nextLevel - 1] ?? exerciseCopy.proof;
-    setFeedback(
-      nextLevel === 6
-        ? formatAcademyProofTrace(exercise, proofAnalysis, locale)
-        : hint,
-    );
+    setFeedback({ kind: "HINT", level: nextLevel });
   };
 
   const revealAnswer = () => {
@@ -454,9 +444,7 @@ export function Academy({
     setShowExplanationSources(true);
     setLogicStreak(0);
     if (activeScenario) persistV3(recordAcademyHintV3(progressV3, activeScenario.id, 7));
-    setFeedback(
-      `${t("academy.h7")} ${exerciseCopy.proof}`,
-    );
+    setFeedback({ kind: "H7" });
   };
 
   const openNext = () => {
@@ -553,7 +541,7 @@ export function Academy({
                     className={`primer-cell${primerSolved ? " is-revealed is-empty" : ""}`}
                     type="button"
                     key={index}
-                    onClick={() => solvePrimerStep(t("academy.primer.revealSuccess"))}
+                    onClick={() => solvePrimerStep("academy.primer.revealSuccess")}
                   >{primerSolved ? "" : "?"}</button>
                 ) : <span className="primer-cell is-revealed is-empty" aria-label={t("academy.primer.openBlankAria")} key={index} />)}
               </div>
@@ -566,16 +554,16 @@ export function Academy({
                     type="button"
                     key={index}
                     aria-label={t("academy.primer.flagAria")}
-                    onClick={() => { if (!primerSolved) setPrimerFeedback(t("academy.primer.leftClick")); }}
-                    onContextMenu={(event) => { event.preventDefault(); solvePrimerStep(t("academy.primer.flagSuccess")); }}
-                    onKeyDown={(event) => { if (event.key.toLowerCase() !== "f") return; event.preventDefault(); solvePrimerStep(t("academy.primer.keyboardSuccess")); }}
+                    onClick={() => { if (!primerSolved) setPrimerFeedbackId("academy.primer.leftClick"); }}
+                    onContextMenu={(event) => { event.preventDefault(); solvePrimerStep("academy.primer.flagSuccess"); }}
+                    onKeyDown={(event) => { if (event.key.toLowerCase() !== "f") return; event.preventDefault(); solvePrimerStep("academy.primer.keyboardSuccess"); }}
                     onPointerCancel={clearPrimerLongPress}
                     onPointerDown={(event) => {
                       if (event.pointerType !== "touch") return;
                       clearPrimerLongPress();
                       primerLongPressRef.current = window.setTimeout(() => {
                         primerLongPressRef.current = null;
-                        solvePrimerStep(t("academy.primer.touchSuccess"));
+                        solvePrimerStep("academy.primer.touchSuccess");
                       }, 350);
                     }}
                     onPointerUp={clearPrimerLongPress}
@@ -599,16 +587,16 @@ export function Academy({
                     type="button"
                     key={index}
                     aria-label={t("academy.primer.independentMineAria")}
-                    onClick={() => { if (!primerSolved) setPrimerFeedback(t("academy.primer.leftClick")); }}
-                    onContextMenu={(event) => { event.preventDefault(); solvePrimerStep(t("academy.primer.independentSuccess")); }}
-                    onKeyDown={(event) => { if (event.key.toLowerCase() !== "f") return; event.preventDefault(); solvePrimerStep(t("academy.primer.independentSuccess")); }}
+                    onClick={() => { if (!primerSolved) setPrimerFeedbackId("academy.primer.leftClick"); }}
+                    onContextMenu={(event) => { event.preventDefault(); solvePrimerStep("academy.primer.independentSuccess"); }}
+                    onKeyDown={(event) => { if (event.key.toLowerCase() !== "f") return; event.preventDefault(); solvePrimerStep("academy.primer.independentSuccess"); }}
                     onPointerCancel={clearPrimerLongPress}
                     onPointerDown={(event) => {
                       if (event.pointerType !== "touch") return;
                       clearPrimerLongPress();
                       primerLongPressRef.current = window.setTimeout(() => {
                         primerLongPressRef.current = null;
-                        solvePrimerStep(t("academy.primer.independentSuccess"));
+                        solvePrimerStep("academy.primer.independentSuccess");
                       }, 350);
                     }}
                     onPointerUp={clearPrimerLongPress}
@@ -619,8 +607,8 @@ export function Academy({
                     type="button"
                     key={index}
                     aria-label={t("academy.primer.independentSafeAria")}
-                    onClick={() => setPrimerFeedback(t("academy.primer.independentWrong"))}
-                    onContextMenu={(event) => { event.preventDefault(); setPrimerFeedback(t("academy.primer.independentWrong")); }}
+                    onClick={() => setPrimerFeedbackId("academy.primer.independentWrong")}
+                    onContextMenu={(event) => { event.preventDefault(); setPrimerFeedbackId("academy.primer.independentWrong"); }}
                   >?</button>;
                   return <span
                     className={`primer-cell is-revealed${value === 0 ? " is-empty" : ` number-${value}`}`}
@@ -636,14 +624,14 @@ export function Academy({
                   const flagIndex = primerStep === 4 ? 5 : 3;
                   const safeIndex = primerStep === 4 ? 3 : 5;
                   if (index === flagIndex) return <span className="primer-cell is-flagged" key={index} aria-label={t("academy.primer.flaggedMine")}><AcademyFlagIcon /></span>;
-                  if (index === 4) return <button className="primer-cell is-revealed number-1" type="button" key={index} aria-label={t("academy.primer.expandClueAria")} onClick={() => solvePrimerStep(t("academy.primer.expandSuccess"))}>1</button>;
+                  if (index === 4) return <button className="primer-cell is-revealed number-1" type="button" key={index} aria-label={t("academy.primer.expandClueAria")} onClick={() => solvePrimerStep("academy.primer.expandSuccess")}>1</button>;
                   const value = primerAdjacentMineCount(index, flagIndex);
                   if (index === safeIndex) return <button
                     className={`primer-cell${primerSolved ? ` is-revealed${value === 0 ? " is-empty" : ` number-${value}`}` : ""}`}
                     type="button"
                     key={index}
                     aria-label={t("academy.primer.revealSafeAria")}
-                    onClick={() => solvePrimerStep(t("academy.primer.revealSafeSuccess"))}
+                    onClick={() => solvePrimerStep("academy.primer.revealSafeSuccess")}
                   >{primerSolved ? (value || "") : "?"}</button>;
                   return <span
                     className={`primer-cell is-revealed${value === 0 ? " is-empty" : ` number-${value}`}`}
@@ -654,7 +642,7 @@ export function Academy({
               </div>
             )}
             <div className="academy-primer-feedback" aria-live="polite">
-              {primerFeedback}
+              {t(primerFeedbackId)}
             </div>
             <button
               className="primary-button"
@@ -699,7 +687,7 @@ export function Academy({
                           setModuleStageIndex(0);
                           setPrimerStep(0);
                           setPrimerSolved(false);
-                          setPrimerFeedback(t("academy.primer.start"));
+                          setPrimerFeedbackId("academy.primer.start");
                           setView("primer");
                         } else {
                           const firstScenario = scenariosForConcept(module.conceptId)[0];
@@ -887,7 +875,7 @@ export function Academy({
                   setAnswers({});
                   setShowExplanationSources(false);
                   setSolved(false);
-                  setFeedback(t("academy.resetDone"));
+                  setFeedback({ kind: "MESSAGE", id: "academy.resetDone" });
                 }}
               >
                 {t("academy.reset")}
@@ -984,7 +972,7 @@ export function Academy({
               <span>
                 {solved ? t("academy.reasonVerified") : t("academy.hintProgress", { level: hintLevel })}
               </span>
-              <p>{feedback || t("academy.submitPrompt")}</p>
+              <p>{feedbackText || t("academy.submitPrompt")}</p>
             </div></>}
 
             {(solved || hintLevel >= 6) && (exercise.undeterminedTargets?.length ?? 0) >= 2 && (
