@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { translate } from "../src/i18n";
 
 test("home modes stay aligned with their copy, background, and selector", async ({
   page,
@@ -10,6 +11,7 @@ test("home modes stay aligned with their copy, background, and selector", async 
   const academy = modeSwitch.getByRole("button", { name: /扫雷学院/ });
   const duel = modeSwitch.getByRole("button", { name: /1v1 对战/ });
   const hero = page.getByTestId("home-hero-visual");
+  const title = page.locator(".hero-mode-copy h1");
 
   await expect(modeSwitch).toHaveCSS(
     "grid-template-columns",
@@ -29,7 +31,7 @@ test("home modes stay aligned with their copy, background, and selector", async 
     "src",
     "/hero-solo-verified-v1.svg",
   );
-  await expect(page.getByRole("heading", { name: /每一局/ })).toBeVisible();
+  await expect(title).toHaveText(translate("zh-CN", "home.solo.title"));
 
   await academy.click();
   await expect(academy).toHaveAttribute("aria-pressed", "true");
@@ -38,7 +40,7 @@ test("home modes stay aligned with their copy, background, and selector", async 
     "src",
     "/hero-academy-verified-v1.svg",
   );
-  await expect(page.getByRole("heading", { name: /看懂每一步/ })).toBeVisible();
+  await expect(title).toHaveText(translate("zh-CN", "home.academy.title"));
 
   await duel.click();
   await expect(duel).toHaveAttribute("aria-pressed", "true");
@@ -47,5 +49,5 @@ test("home modes stay aligned with their copy, background, and selector", async 
     "src",
     "/hero-board-h-v2.svg",
   );
-  await expect(page.getByRole("heading", { name: /扫雷，终于/ })).toBeVisible();
+  await expect(title).toHaveText(translate("zh-CN", "home.duel.title"));
 });
