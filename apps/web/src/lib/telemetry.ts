@@ -22,10 +22,15 @@ export const ALLOWED_TELEMETRY_EVENT_NAMES = [
   "mode_selected",
   "solo_run_started",
   "solo_run_terminal",
+  "practice_run_started",
+  "practice_hint_shown",
+  "practice_assist_applied",
+  "practice_run_terminal",
   "solo_history_opened",
   "solo_history_filtered",
   "solo_exported",
   "no_guess_generation_finished",
+  "practice_no_guess_generation_finished",
   "duel_invite_created",
   "duel_invite_opened",
   "duel_joined",
@@ -157,6 +162,42 @@ const PROPERTY_ALLOWLIST: Readonly<
     "inputP95Ms",
     "stageDurationMs",
   ]),
+  practice_run_started: new Set([
+    "trainingSessionId",
+    "preset",
+    "generationMode",
+    "width",
+    "height",
+    "mines",
+    "assistMode",
+    "stageDurationMs",
+  ]),
+  practice_hint_shown: new Set([
+    "trigger",
+    "status",
+    "action",
+    "stageDurationMs",
+  ]),
+  practice_assist_applied: new Set([
+    "trigger",
+    "action",
+    "stageDurationMs",
+  ]),
+  practice_run_terminal: new Set([
+    "trainingSessionId",
+    "preset",
+    "generationMode",
+    "outcome",
+    "elapsedMs",
+    "playerActions",
+    "hintsShown",
+    "hintsRequested",
+    "autoFlags",
+    "demonstratedActions",
+    "historySaved",
+    "historyFailureReason",
+    "stageDurationMs",
+  ]),
   solo_history_opened: new Set([
     "scope",
     "recordCount",
@@ -176,12 +217,121 @@ const PROPERTY_ALLOWLIST: Readonly<
     "elapsedMs",
     "failureReason",
   ]),
+  practice_no_guess_generation_finished: new Set([
+    "preset",
+    "success",
+    "attempts",
+    "elapsedMs",
+    "failureReason",
+  ]),
   duel_invite_created: new Set(["source", "stageDurationMs"]),
   duel_invite_opened: new Set(["source", "stageDurationMs"]),
   duel_joined: new Set(["stageDurationMs"]),
   duel_started: new Set(["round", "stageDurationMs"]),
   duel_completed: new Set(["outcome", "rounds", "stageDurationMs"]),
   duel_dnf: new Set(["reason", "round", "stageDurationMs"]),
+};
+
+type TelemetryPropertyValidator = (value: TelemetryProperty) => boolean;
+
+function enumProperty(
+  ...allowedValues: readonly string[]
+): TelemetryPropertyValidator {
+  const allowed = new Set(allowedValues);
+  return (value) => typeof value === "string" && allowed.has(value);
+}
+
+const nonNegativeNumber: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+const nonNegativeInteger: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const boardDimension: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= 5 &&
+  value <= 100;
+const mineCount: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= 1 &&
+  value <= 4_000;
+const booleanProperty: TelemetryPropertyValidator = (value) =>
+  typeof value === "boolean";
+const trainingSessionId: TelemetryPropertyValidator = (value) =>
+  typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/u.test(value);
+const practiceHistoryFailureReason: TelemetryPropertyValidator = (value) =>
+  value === null ||
+  (typeof value === "string" && [
+    "QUOTA",
+    "SERIALIZATION",
+    "STORAGE",
+    "REPLAY_LIMIT",
+  ].includes(value));
+
+// Keep the browser's practice-event contract as strict as the ingest
+// contract. This prevents an invalid persisted event from poisoning every
+// later batch with a repeatable server-side 400 response.
+const PRACTICE_PROPERTY_VALIDATORS: Readonly<
+  Partial<
+    Record<
+      AllowedTelemetryEventName,
+      Readonly<Record<string, TelemetryPropertyValidator>>
+    >
+  >
+> = {
+  practice_run_started: {
+    trainingSessionId,
+    preset: enumProperty("beginner", "intermediate", "expert", "custom"),
+    generationMode: enumProperty("classic", "no_guess"),
+    width: boardDimension,
+    height: boardDimension,
+    mines: mineCount,
+    assistMode: enumProperty("COACH", "AUTO_MARK_MINES"),
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_hint_shown: {
+    trigger: enumProperty("IDLE", "REQUEST"),
+    status: enumProperty(
+      "READY",
+      "NO_FORCED_MOVE",
+      "PARTIAL",
+      "CONTRADICTION",
+      "ERROR",
+    ),
+    action: enumProperty("REVEAL", "FLAG", "UNFLAG", "NONE"),
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_assist_applied: {
+    trigger: enumProperty("AUTO_MARK", "DEMONSTRATE"),
+    action: enumProperty("REVEAL", "FLAG", "UNFLAG"),
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_run_terminal: {
+    trainingSessionId,
+    preset: enumProperty("beginner", "intermediate", "expert", "custom"),
+    generationMode: enumProperty("classic", "no_guess"),
+    outcome: enumProperty("WON", "LOST"),
+    elapsedMs: nonNegativeNumber,
+    playerActions: nonNegativeInteger,
+    hintsShown: nonNegativeInteger,
+    hintsRequested: nonNegativeInteger,
+    autoFlags: nonNegativeInteger,
+    demonstratedActions: nonNegativeInteger,
+    historySaved: booleanProperty,
+    historyFailureReason: practiceHistoryFailureReason,
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_no_guess_generation_finished: {
+    preset: enumProperty("beginner", "intermediate", "expert", "custom"),
+    success: booleanProperty,
+    attempts: nonNegativeInteger,
+    elapsedMs: nonNegativeNumber,
+    failureReason: enumProperty(
+      "ATTEMPT_LIMIT",
+      "TIME_LIMIT",
+      "GENERATION_ERROR",
+    ),
+  },
 };
 
 const FORBIDDEN_PROPERTY_PATTERN =
@@ -329,10 +479,14 @@ export function sanitizeTelemetryProperties(
   properties: Readonly<Record<string, TelemetryProperty>>,
 ): Readonly<Record<string, TelemetryProperty>> | null {
   const allowed = PROPERTY_ALLOWLIST[eventName];
+  const practiceValidators = PRACTICE_PROPERTY_VALIDATORS[eventName];
   const sanitized: Record<string, TelemetryProperty> = {};
   for (const [key, value] of Object.entries(properties)) {
+    const practiceValidator = practiceValidators?.[key];
     if (
       !allowed.has(key) ||
+      (practiceValidators &&
+        (!practiceValidator || !practiceValidator(value))) ||
       FORBIDDEN_PROPERTY_PATTERN.test(key) ||
       value === undefined ||
       (typeof value === "string" && value.length > 64) ||

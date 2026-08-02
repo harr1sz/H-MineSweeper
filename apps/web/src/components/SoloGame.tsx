@@ -9,10 +9,11 @@ import {
   countBoardActions,
   createBoard,
   createGameState,
+  getNeighborIndices,
   getProgress,
   hashBoard,
   hashGameState,
-  isProvablySafeCell,
+  hashVisibleBoardState,
   revealCell,
   toggleFlag,
   type BoardSpec,
@@ -20,6 +21,8 @@ import {
   type CountedBoardAction,
   type GameState,
   type RevealDelta,
+  type VisibleBoardProof,
+  type VisibleBoardState,
 } from "@h-minesweeper/game-core";
 import {
   useCallback,
@@ -41,6 +44,16 @@ import {
   type SoloGenerationMode,
   type SoloPreset,
 } from "../lib/solo";
+import {
+  SOLO_COMBO_WINDOW_MS,
+  createSoloComboState,
+  getSoloComboDeadlineMs,
+  getSoloComboTier,
+  reduceSoloCombo,
+  type SoloComboActor,
+  type SoloComboEvent,
+  type SoloComboResetReason,
+} from "../lib/solo-combo";
 import {
   SOLO_GAME_RULES_VERSION,
   SOLO_METRIC_RULES_VERSION,
@@ -68,6 +81,31 @@ import {
 } from "../lib/solo-preferences";
 import { percentile } from "../lib/performance";
 import {
+  createCoachRequest,
+  coachMineActionsForApplication,
+  isCoachActionProven,
+  isCoachChordProven,
+  isCoachSuggestionApplicable,
+  parseCoachSuggestion,
+  visibleBoardStateForPractice,
+  type CoachAction,
+  type CoachSuggestion,
+  type PracticeAssistMode,
+  type SoloSessionKind,
+} from "../lib/practice-coach";
+import {
+  PRACTICE_REPLAY_SCHEMA_VERSION,
+  createIndexedDbPracticeHistoryStore,
+  hashPracticeReplay,
+  type PracticeAssistanceShownEventV1,
+  type PracticeCoachActionEventV1,
+  type PracticeHintTrigger,
+  type PracticeReplayEventV1,
+  type PracticeReplayV1,
+  type PracticeRunRecordV1,
+  PracticeHistoryCapacityError,
+} from "../lib/practice-history";
+import {
   CanvasBoard,
   type BoardAction,
   type BoardActionVisual,
@@ -76,13 +114,15 @@ import {
   type BoardTheme,
 } from "./CanvasBoard";
 import { SoloHistory } from "./SoloHistory";
+import { PracticeHistory } from "./PracticeHistory";
 import { useTelemetry } from "./TelemetryPrivacy";
-import { useLocale } from "../i18n";
+import { useLocale, type MessageDescriptor } from "../i18n";
 import "./solo-game.css";
 
 interface SoloGameProps {
   readonly effectsProfile: BoardEffectsProfile;
   readonly initialGenerationMode?: SoloGenerationMode;
+  readonly initialSessionKind?: SoloSessionKind;
   readonly initialBoardConfig?: SoloBoardConfig;
   readonly reducedMotion: boolean;
   readonly onExit: () => void;
@@ -90,6 +130,26 @@ interface SoloGameProps {
 
 type SoloStatus = "READY" | "GENERATING" | "PLAYING" | "WON" | "LOST";
 type StatsLevel = "basic" | "advanced" | "analysis";
+
+interface RecordActionOptions {
+  readonly physicalClicks?: number;
+  readonly comboActor?: SoloComboActor;
+  readonly actionAt?: number;
+}
+
+export const PRACTICE_COACH_IDLE_MS = 8_000;
+export const PRACTICE_COACH_TIMEOUT_MS = 2_500;
+
+type PracticeSaveState = "IDLE" | "SAVING" | "SAVED" | "FAILED" | "TOO_LARGE";
+
+function preferenceLoadMessage(
+  errorCode: ReturnType<typeof loadSoloPreferences>["errorCode"],
+): MessageDescriptor | null {
+  if (errorCode === "INVALID_VERSION") return { id: "solo.preferenceInvalid" };
+  if (errorCode === "CORRUPT_DATA") return { id: "solo.preferenceCorrupt" };
+  if (errorCode === "READ_FAILED") return { id: "solo.preferenceReadFailed" };
+  return null;
+}
 
 const EMPTY_ACTION_BREAKDOWN = countBoardActions([]);
 export const SOLO_EFFECTIVE_INTERACTION_IDLE_CAP_MS = 30_000;
@@ -344,20 +404,21 @@ function classifyHistoryFailure(error: unknown): string {
 export function SoloGame({
   effectsProfile,
   initialGenerationMode,
+  initialSessionKind = "STANDARD",
   initialBoardConfig,
   reducedMotion,
   onExit,
 }: SoloGameProps) {
-  const { locale, t } = useLocale();
-  const configErrorMessage = useCallback((nextConfig: SoloBoardConfig) => {
+  const { t } = useLocale();
+  const configErrorDescriptor = useCallback((nextConfig: SoloBoardConfig): MessageDescriptor | null => {
     const error = getSoloConfigErrorCode(nextConfig);
-    if (!error) return "";
-    if (error.code === "WIDTH_RANGE") return t("solo.config.width");
-    if (error.code === "HEIGHT_RANGE") return t("solo.config.height");
-    if (error.code === "CELL_LIMIT") return t("solo.config.cells");
-    if (error.code === "MINE_RANGE") return t("solo.config.mines", { max: error.maxMines });
-    return t("solo.config.noGuessSize");
-  }, [t]);
+    if (!error) return null;
+    if (error.code === "WIDTH_RANGE") return { id: "solo.config.width" };
+    if (error.code === "HEIGHT_RANGE") return { id: "solo.config.height" };
+    if (error.code === "CELL_LIMIT") return { id: "solo.config.cells" };
+    if (error.code === "MINE_RANGE") return { id: "solo.config.mines", values: { max: error.maxMines } };
+    return { id: "solo.config.noGuessSize" };
+  }, []);
   const { flush: flushTelemetry, track } = useTelemetry();
   const preferenceLoadRef = useRef(loadSoloPreferences());
   const restoredPreferences = preferenceLoadRef.current.preferences;
@@ -381,8 +442,25 @@ export function SoloGame({
   const workerTimeoutRef = useRef<number | null>(null);
   const workerRequestRef = useRef(0);
   const generationActiveRef = useRef(false);
+  const coachWorkerRef = useRef<Worker | null>(null);
+  const coachTimeoutRef = useRef<number | null>(null);
+  const coachRequestRef = useRef(0);
+  const coachFeedbackWorkerRef = useRef<Worker | null>(null);
+  const coachFeedbackTimeoutRef = useRef<number | null>(null);
+  const coachFeedbackRequestRef = useRef(0);
+  const coachAnalysisRef = useRef<CoachSuggestion | null>(null);
+  const practiceManualHintPendingRef = useRef(false);
+  const practiceLastInteractionAtRef = useRef<number | null>(null);
+  const practiceShownStateHashesRef = useRef(new Set<string>());
+  const practiceSuppressedAutoFlagsRef = useRef(new Set<number>());
+  const practiceEventsRef = useRef<PracticeReplayEventV1[]>([]);
+  const practiceEventsOverflowRef = useRef(false);
+  const practiceStartedAtRef = useRef<number | null>(null);
+  const practiceSavedRunRef = useRef("");
+  const practiceUsedAutoMarkRef = useRef(false);
+  const autoMarkMinesRef = useRef(false);
   const visualSequenceRef = useRef(0);
-  const lastComboAtRef = useRef<number | null>(null);
+  const comboStateRef = useRef(createSoloComboState());
   const comboTimeoutRef = useRef<number | null>(null);
   const actionTraceRef = useRef<CountedBoardAction[]>([]);
   const replayActionTraceRef = useRef<SoloReplayActionV1[]>([]);
@@ -391,6 +469,7 @@ export function SoloGame({
   const initialFlagsRef = useRef<readonly number[]>([]);
   const boardSpecRef = useRef<BoardSpec | null>(null);
   const historyStoreRef = useRef(createIndexedDbSoloHistoryStore());
+  const practiceHistoryStoreRef = useRef(createIndexedDbPracticeHistoryStore());
   const runIdentityRef = useRef<SoloRunIdentity | null>(null);
   const runCompletedAtRef = useRef<number | null>(null);
   const historyEnqueuedRunRef = useRef("");
@@ -405,6 +484,8 @@ export function SoloGame({
   const [config, setConfig] = useState<SoloBoardConfig>(initialConfig);
   const [preset, setPreset] = useState<SoloPreset>(initialPreset);
   const [mode, setMode] = useState<SoloGenerationMode>(launchMode);
+  const [sessionKind, setSessionKind] =
+    useState<SoloSessionKind>(initialSessionKind);
   const [setupComplete, setSetupComplete] = useState(false);
   const [status, setStatus] = useState<SoloStatus>("READY");
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -414,7 +495,19 @@ export function SoloGame({
     useState<ActionCountBreakdown>(EMPTY_ACTION_BREAKDOWN);
   const [board3BV, setBoard3BV] = useState<number | null>(null);
   const [actionVisual, setActionVisual] = useState<BoardActionVisual>();
-  const [combo, setCombo] = useState(0);
+  const [comboState, setComboState] = useState(comboStateRef.current);
+  const [coachAnalysis, setCoachAnalysis] = useState<CoachSuggestion | null>(null);
+  const [displayedCoachSuggestion, setDisplayedCoachSuggestion] =
+    useState<CoachSuggestion | null>(null);
+  const [coachBusy, setCoachBusy] = useState(false);
+  const [coachTransportError, setCoachTransportError] = useState(false);
+  const [coachIdleSeconds, setCoachIdleSeconds] = useState(8);
+  const [autoMarkMines, setAutoMarkMines] = useState(false);
+  const [autoFlaggedIndexes, setAutoFlaggedIndexes] =
+    useState<ReadonlySet<number>>(() => new Set());
+  const [practiceSaveState, setPracticeSaveState] =
+    useState<PracticeSaveState>("IDLE");
+  const [practiceHistoryRefresh, setPracticeHistoryRefresh] = useState(0);
   const [statsLevel, setStatsLevel] = useState<StatsLevel>(
     launchPreferences.statsLevel,
   );
@@ -429,15 +522,21 @@ export function SoloGame({
   const [coarsePointer] = useState(
     () => window.matchMedia("(pointer: coarse)").matches,
   );
-  const [notice, setNotice] = useState(
-    preferenceLoadRef.current.error ??
-      (launchMode === "no_guess"
-      ? t("solo.noGuessDescription")
-      : t("solo.classicDescription")),
+  const [notice, setNotice] = useState<MessageDescriptor | null>(
+    () => preferenceLoadMessage(preferenceLoadRef.current.errorCode) ?? {
+      id: initialSessionKind === "GUIDED_PRACTICE"
+        ? launchMode === "no_guess"
+          ? "practice.setup.noGuessRecommended"
+          : "practice.setup.classicWarning"
+        : launchMode === "no_guess"
+          ? "solo.noGuessDescription"
+          : "solo.classicDescription",
+    },
   );
   const [seed, setSeed] = useState("");
   const [boardHash, setBoardHash] = useState("");
-  const [generationSummary, setGenerationSummary] = useState("");
+  const [generationSummary, setGenerationSummary] =
+    useState<MessageDescriptor | null>(null);
   const [terminalDetonatedIndex, setTerminalDetonatedIndex] = useState<number>();
   const [draftWidth, setDraftWidth] = useState(String(initialConfig.width));
   const [draftHeight, setDraftHeight] = useState(String(initialConfig.height));
@@ -445,21 +544,6 @@ export function SoloGame({
   const [pendingWriteVersion, setPendingWriteVersion] = useState(
     pendingHistoryVersion,
   );
-  useEffect(() => {
-    setNotice(
-      status === "GENERATING"
-        ? t("solo.generatingNotice")
-        : status === "WON"
-          ? t("solo.wonNotice")
-          : status === "LOST"
-            ? t("solo.lostNotice")
-            : status === "READY"
-              ? t(config.mode === "no_guess" ? "solo.noGuessDescription" : "solo.classicDescription")
-              : t("solo.mantra"),
-    );
-    // Preserve the run while refreshing status copy in the selected locale.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
   const handleCurrentBestChange = useCallback((elapsed: number | null) => {
     setCurrentRulesPersonalBestMs(elapsed);
   }, []);
@@ -476,6 +560,54 @@ export function SoloGame({
     setRevision((value) => value + 1);
   }, []);
 
+  const setCurrentCoachAnalysis = useCallback(
+    (suggestion: CoachSuggestion | null) => {
+      coachAnalysisRef.current = suggestion;
+      setCoachAnalysis(suggestion);
+    },
+    [],
+  );
+
+  const cancelCoachAnalysis = useCallback(() => {
+    coachRequestRef.current += 1;
+    coachWorkerRef.current?.terminate();
+    coachWorkerRef.current = null;
+    if (coachTimeoutRef.current !== null) {
+      window.clearTimeout(coachTimeoutRef.current);
+      coachTimeoutRef.current = null;
+    }
+    setCoachBusy(false);
+  }, []);
+
+  const cancelCoachFeedbackAnalysis = useCallback(() => {
+    coachFeedbackRequestRef.current += 1;
+    coachFeedbackWorkerRef.current?.terminate();
+    coachFeedbackWorkerRef.current = null;
+    if (coachFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(coachFeedbackTimeoutRef.current);
+      coachFeedbackTimeoutRef.current = null;
+    }
+  }, []);
+
+  const appendPracticeEvent = useCallback(
+    (
+      createEvent: (seq: number, elapsedMs: number) => PracticeReplayEventV1,
+      actionAt = performance.now(),
+    ) => {
+      if (practiceEventsOverflowRef.current) return;
+      if (practiceEventsRef.current.length >= SOLO_REPLAY_MAX_ACTIONS) {
+        practiceEventsOverflowRef.current = true;
+        return;
+      }
+      const beganAt = practiceStartedAtRef.current;
+      practiceEventsRef.current.push(createEvent(
+        practiceEventsRef.current.length + 1,
+        beganAt === null ? 0 : Math.max(0, actionAt - beganAt),
+      ));
+    },
+    [],
+  );
+
   const recordEffectiveInteraction = useCallback((now: number): number => {
     if (document.visibilityState !== "visible") {
       lastEffectiveInteractionAtRef.current = null;
@@ -490,14 +622,46 @@ export function SoloGame({
     return effectiveInteractionAccumulatedMsRef.current;
   }, []);
 
-  const clearCombo = useCallback(() => {
-    lastComboAtRef.current = null;
+  const applyComboEvent = useCallback((event: SoloComboEvent) => {
+    const previous = comboStateRef.current;
+    const next = reduceSoloCombo(previous, event);
+    if (next === previous) return;
+
     if (comboTimeoutRef.current !== null) {
       window.clearTimeout(comboTimeoutRef.current);
       comboTimeoutRef.current = null;
     }
-    setCombo(0);
+    comboStateRef.current = next;
+    setComboState(next);
+
+    const scheduleExpiry = (): void => {
+      const deadline = getSoloComboDeadlineMs(comboStateRef.current);
+      if (deadline === null) return;
+      const delayMs = Math.max(1, deadline - performance.now() + 1);
+      comboTimeoutRef.current = window.setTimeout(() => {
+        comboTimeoutRef.current = null;
+        const current = comboStateRef.current;
+        const expired = reduceSoloCombo(current, {
+          type: "EXPIRE",
+          atMs: performance.now(),
+        });
+        if (expired === current) {
+          scheduleExpiry();
+          return;
+        }
+        comboStateRef.current = expired;
+        setComboState(expired);
+      }, delayMs);
+    };
+    scheduleExpiry();
   }, []);
+
+  const clearCombo = useCallback(
+    (reason: SoloComboResetReason = "NEW_GAME") => {
+      applyComboEvent({ type: "RESET", reason });
+    },
+    [applyComboEvent],
+  );
 
   const cancelGeneration = useCallback(() => {
     generationActiveRef.current = false;
@@ -516,13 +680,26 @@ export function SoloGame({
       return () => {
         mountedRef.current = false;
         cancelGeneration();
+        cancelCoachAnalysis();
+        cancelCoachFeedbackAnalysis();
         if (comboTimeoutRef.current !== null) {
           window.clearTimeout(comboTimeoutRef.current);
         }
       };
     },
-    [cancelGeneration],
+    [cancelCoachAnalysis, cancelCoachFeedbackAnalysis, cancelGeneration],
   );
+
+  useEffect(() => {
+    const resetHiddenCombo = () => {
+      if (document.visibilityState !== "visible") {
+        clearCombo("PAGE_HIDDEN");
+      }
+    };
+    document.addEventListener("visibilitychange", resetHiddenCombo);
+    return () =>
+      document.removeEventListener("visibilitychange", resetHiddenCombo);
+  }, [clearCombo]);
 
   useEffect(
     () =>
@@ -557,8 +734,11 @@ export function SoloGame({
     (
       nextConfig: SoloBoardConfig = config,
       nextPreset: SoloPreset = preset,
+      nextSessionKind: SoloSessionKind = sessionKind,
     ) => {
       cancelGeneration();
+      cancelCoachAnalysis();
+      cancelCoachFeedbackAnalysis();
       pendingSeedRef.current = createSoloSeed();
       const pending = createPendingSoloGame(
         nextConfig,
@@ -568,6 +748,7 @@ export function SoloGame({
       setConfig(nextConfig);
       setPreset(nextPreset);
       setMode(nextConfig.mode);
+      setSessionKind(nextSessionKind);
       setStatus("READY");
       setStartedAt(null);
       setFinishedAt(null);
@@ -576,6 +757,16 @@ export function SoloGame({
       replayActionTraceRef.current = [];
       lastReplayStateHashRef.current = hashGameState(pending);
       replayTruncationReasonRef.current = null;
+      practiceEventsRef.current = [];
+      practiceEventsOverflowRef.current = false;
+      practiceStartedAtRef.current = null;
+      practiceSavedRunRef.current = "";
+      practiceUsedAutoMarkRef.current = false;
+      practiceManualHintPendingRef.current = false;
+      practiceLastInteractionAtRef.current = null;
+      practiceShownStateHashesRef.current.clear();
+      practiceSuppressedAutoFlagsRef.current.clear();
+      autoMarkMinesRef.current = false;
       initialFlagsRef.current = [];
       boardSpecRef.current = null;
       runIdentityRef.current = null;
@@ -589,20 +780,41 @@ export function SoloGame({
       setBoard3BV(null);
       setActionVisual(undefined);
       clearCombo();
+      setCurrentCoachAnalysis(null);
+      setDisplayedCoachSuggestion(null);
+      setCoachTransportError(false);
+      setCoachIdleSeconds(8);
+      setAutoMarkMines(false);
+      setAutoFlaggedIndexes(new Set());
+      setPracticeSaveState("IDLE");
       setLegacyPersonalBestMs(null);
       setCurrentRulesPersonalBestMs(null);
       setIsNewPersonalBest(false);
       setSeed("");
       setBoardHash("");
-      setGenerationSummary("");
+      setGenerationSummary(null);
       setTerminalDetonatedIndex(undefined);
-      setNotice(
-        nextConfig.mode === "no_guess"
-          ? t("solo.noGuessDescription")
-          : t("solo.classicDescription"),
-      );
+      setNotice({
+        id: nextSessionKind === "GUIDED_PRACTICE"
+          ? nextConfig.mode === "no_guess"
+            ? "practice.setup.noGuessRecommended"
+            : "practice.setup.classicWarning"
+          : nextConfig.mode === "no_guess"
+            ? "solo.noGuessDescription"
+            : "solo.classicDescription",
+      });
     },
-    [cancelGeneration, clearCombo, config, preset, replaceGame, t],
+    [
+      cancelCoachAnalysis,
+      cancelCoachFeedbackAnalysis,
+      cancelGeneration,
+      clearCombo,
+      config,
+      preset,
+      replaceGame,
+      sessionKind,
+      setCurrentCoachAnalysis,
+    ],
   );
 
   const finishIfTerminal = useCallback(
@@ -611,6 +823,7 @@ export function SoloGame({
         setStatus("PLAYING");
         return;
       }
+      cancelCoachFeedbackAnalysis();
       setFinishedAt(completedAt);
       setClockNow(completedAt);
       runCompletedAtRef.current = Date.now();
@@ -618,13 +831,13 @@ export function SoloGame({
       runEffectiveInteractionMsRef.current =
         effectiveInteractionAccumulatedMsRef.current;
       setStatus(next.outcome === "WON" ? "WON" : "LOST");
-      setNotice(
-        next.outcome === "WON"
-          ? t("solo.wonNotice")
-          : t("solo.lostNotice"),
-      );
+      setNotice({
+        id: next.outcome === "WON"
+          ? "solo.wonNotice"
+          : "solo.lostNotice",
+      });
     },
-    [t],
+    [cancelCoachFeedbackAnalysis],
   );
 
   const recordAction = useCallback(
@@ -633,9 +846,10 @@ export function SoloGame({
       originIndex: number,
       delta: RevealDelta,
       preStateHash: string,
-      comboEligible = false,
-      physicalClicks = 1,
+      options: RecordActionOptions = {},
     ) => {
+      const physicalClicks = options.physicalClicks ?? 1;
+      const actionAt = options.actionAt ?? performance.now();
       const safeReveals = delta.revealed.reduce(
         (count, cell) => count + (cell.value >= 0 ? 1 : 0),
         0,
@@ -654,11 +868,39 @@ export function SoloGame({
         );
       }
       actionTraceRef.current.push(countedAction);
-      if (replayActionTraceRef.current.length < SOLO_REPLAY_MAX_ACTIONS) {
+      if (sessionKind === "GUIDED_PRACTICE") {
+        appendPracticeEvent(
+          (seq, elapsedMs) => ({
+            eventType: "PLAYER_ACTION",
+            seq,
+            elapsedMs,
+            actionType,
+            cellIndex: originIndex,
+            physicalClicks,
+            preStateHash,
+            accepted: delta.accepted,
+            ...(delta.rejectReason ? { rejectReason: delta.rejectReason } : {}),
+            postStateHash: delta.stateHash,
+          }),
+          actionAt,
+        );
+        if (delta.revealed.some(({ value }) => value >= 0)) {
+          practiceSuppressedAutoFlagsRef.current.clear();
+        }
+        if (delta.flagged?.flagged === false) {
+          setAutoFlaggedIndexes((current) => {
+            if (!current.has(originIndex)) return current;
+            practiceSuppressedAutoFlagsRef.current.add(originIndex);
+            const next = new Set(current);
+            next.delete(originIndex);
+            return next;
+          });
+        }
+      } else if (replayActionTraceRef.current.length < SOLO_REPLAY_MAX_ACTIONS) {
         replayActionTraceRef.current.push({
           seq: replayActionTraceRef.current.length + 1,
           elapsedMs:
-            startedAt === null ? 0 : Math.max(0, performance.now() - startedAt),
+            startedAt === null ? 0 : Math.max(0, actionAt - startedAt),
           actionType,
           cellIndex: originIndex,
           physicalClicks,
@@ -688,38 +930,23 @@ export function SoloGame({
         revealedSafeCount: safeReveals,
       });
 
-      if (
-        !delta.accepted ||
-        delta.hitMine === true ||
-        ((actionType === "REVEAL" || actionType === "CHORD") &&
-          (safeReveals === 0 || !comboEligible))
-      ) {
-        clearCombo();
-        return;
-      }
-      if (
-        actionType !== "REVEAL" &&
-        actionType !== "CHORD"
-      ) {
-        return;
-      }
-
-      const now = performance.now();
-      const continuesCombo =
-        lastComboAtRef.current !== null &&
-        now - lastComboAtRef.current <= 900;
-      lastComboAtRef.current = now;
-      setCombo((current) => (continuesCombo ? current + 1 : 1));
-      if (comboTimeoutRef.current !== null) {
-        window.clearTimeout(comboTimeoutRef.current);
-      }
-      comboTimeoutRef.current = window.setTimeout(() => {
-        lastComboAtRef.current = null;
-        setCombo(0);
-        comboTimeoutRef.current = null;
-      }, 900);
+      const comboAction =
+        actionType === "TOGGLE_FLAG"
+          ? delta.flagged?.flagged === false
+            ? "UNFLAG"
+            : "FLAG"
+          : actionType;
+      applyComboEvent({
+        type: "ACTION",
+        actor: options.comboActor ?? "PLAYER",
+        action: comboAction,
+        accepted: delta.accepted,
+        safeCellsRevealed: safeReveals,
+        hitMine: delta.hitMine === true,
+        atMs: actionAt,
+      });
     },
-    [clearCombo, startedAt],
+    [appendPracticeEvent, applyComboEvent, sessionKind, startedAt],
   );
 
   const beginGame = useCallback(
@@ -728,7 +955,7 @@ export function SoloGame({
       firstIndex: number,
       flaggedIndexes: readonly number[],
       options: {
-        readonly generation?: string;
+        readonly generation?: MessageDescriptor;
         readonly physicalClicks?: number;
       } = {},
     ) => {
@@ -737,7 +964,12 @@ export function SoloGame({
       initialFlagsRef.current = [...new Set(flaggedIndexes)].sort((a, b) => a - b);
       boardSpecRef.current = Object.freeze({ ...spec });
       const beganAt = performance.now();
-      const nextRunIdentity = createSoloRunIdentity();
+      const nextRunIdentity = sessionKind === "GUIDED_PRACTICE"
+        ? {
+            runId: globalThis.crypto.randomUUID(),
+            trainingSessionId: globalThis.crypto.randomUUID(),
+          }
+        : createSoloRunIdentity();
       runIdentityRef.current = nextRunIdentity;
       runCompletedAtRef.current = null;
       historyEnqueuedRunRef.current = "";
@@ -748,22 +980,38 @@ export function SoloGame({
       const preStateHash = hashGameState(next);
       lastReplayStateHashRef.current = preStateHash;
       const delta = revealCell(next, firstIndex);
+      if (sessionKind === "GUIDED_PRACTICE") {
+        practiceStartedAtRef.current = beganAt;
+        practiceLastInteractionAtRef.current = beganAt;
+      }
       setStartedAt(beganAt);
       setFinishedAt(null);
       setClockNow(beganAt);
       setSeed(spec.seed);
       const calculatedBoardHash = hashBoard(next.board);
       setBoardHash(calculatedBoardHash);
-      setGenerationSummary(options.generation ?? "");
+      setGenerationSummary(options.generation ?? null);
       setBoard3BV(calculate3BV(next.board).value);
-      track("solo_run_started", {
-        trainingSessionId: nextRunIdentity.trainingSessionId,
-        preset,
-        generationMode: config.mode,
-        width: config.width,
-        height: config.height,
-        mines: config.mines,
-      });
+      track(
+        sessionKind === "GUIDED_PRACTICE"
+          ? "practice_run_started"
+          : "solo_run_started",
+        {
+          trainingSessionId: nextRunIdentity.trainingSessionId,
+          preset,
+          generationMode: config.mode,
+          width: config.width,
+          height: config.height,
+          mines: config.mines,
+          ...(sessionKind === "GUIDED_PRACTICE"
+            ? {
+                assistMode: autoMarkMinesRef.current
+                  ? "AUTO_MARK_MINES"
+                  : "COACH",
+              }
+            : {}),
+        },
+      );
       replaceGame(next);
       finishIfTerminal(next, beganAt);
       recordAction(
@@ -771,12 +1019,15 @@ export function SoloGame({
         firstIndex,
         delta,
         preStateHash,
-        delta.accepted && delta.hitMine !== true,
-        options.physicalClicks ?? 1,
+        {
+          physicalClicks: options.physicalClicks ?? 1,
+          comboActor: "PLAYER",
+          actionAt: beganAt,
+        },
       );
       return next.outcome;
     },
-    [config, finishIfTerminal, preset, recordAction, replaceGame, track],
+    [config, finishIfTerminal, preset, recordAction, replaceGame, sessionKind, track],
   );
 
   const generateNoGuess = useCallback(
@@ -790,8 +1041,11 @@ export function SoloGame({
       generationActiveRef.current = true;
       const requestId = workerRequestRef.current;
       const generationStartedAt = performance.now();
+      const generationTelemetryEvent = sessionKind === "GUIDED_PRACTICE"
+        ? "practice_no_guess_generation_finished"
+        : "no_guess_generation_finished";
       setStatus("GENERATING");
-      setNotice(t("solo.generatingNotice"));
+      setNotice({ id: "solo.generatingNotice" });
 
       let worker: Worker;
       try {
@@ -802,8 +1056,8 @@ export function SoloGame({
       } catch {
         generationActiveRef.current = false;
         setStatus("READY");
-        setNotice(t("solo.workerUnavailable"));
-        track("no_guess_generation_finished", {
+        setNotice({ id: "solo.workerUnavailable" });
+        track(generationTelemetryEvent, {
           preset,
           success: false,
           attempts: 0,
@@ -821,7 +1075,7 @@ export function SoloGame({
         maxDurationMs: 5_000,
       };
 
-      const fail = (message: string, failureReason: string) => {
+      const fail = (message: MessageDescriptor, failureReason: string) => {
         if (requestId !== workerRequestRef.current) return;
         worker.terminate();
         workerRef.current = null;
@@ -832,7 +1086,7 @@ export function SoloGame({
         }
         setStatus("READY");
         setNotice(message);
-        track("no_guess_generation_finished", {
+        track(generationTelemetryEvent, {
           preset,
           success: false,
           attempts: 0,
@@ -857,10 +1111,8 @@ export function SoloGame({
         }
         if (!event.data.ok) {
           setStatus("READY");
-          setNotice(
-            t("solo.generationLimit"),
-          );
-          track("no_guess_generation_finished", {
+          setNotice({ id: "solo.generationLimit" });
+          track(generationTelemetryEvent, {
             preset,
             success: false,
             attempts: event.data.attempts,
@@ -869,7 +1121,7 @@ export function SoloGame({
           });
           return;
         }
-        track("no_guess_generation_finished", {
+        track(generationTelemetryEvent, {
           preset,
           success: true,
           attempts: event.data.attempts,
@@ -880,23 +1132,29 @@ export function SoloGame({
           firstIndex,
           flaggedIndexes,
           {
-            generation: t("solo.generationSummary", { attempts: event.data.attempts, elapsed: event.data.elapsedMs.toFixed(0) }),
+            generation: {
+              id: "solo.generationSummary",
+              values: {
+                attempts: event.data.attempts,
+                elapsed: event.data.elapsedMs.toFixed(0),
+              },
+            },
             physicalClicks,
           },
         );
         if (outcome === "PLAYING") {
-          setNotice(t("solo.generationVerified"));
+          setNotice({ id: "solo.generationVerified" });
         }
       };
       worker.onerror = () => {
         fail(
-          t("solo.generationFailed"),
+          { id: "solo.generationFailed" },
           "GENERATION_ERROR",
         );
       };
       workerTimeoutRef.current = window.setTimeout(() => {
         fail(
-          t("solo.generationTimeout"),
+          { id: "solo.generationTimeout" },
           "TIME_LIMIT",
         );
       }, 5_000);
@@ -904,12 +1162,91 @@ export function SoloGame({
         worker.postMessage(request);
       } catch {
         fail(
-          t("solo.generationPostFailed"),
+          { id: "solo.generationPostFailed" },
           "GENERATION_ERROR",
         );
       }
     },
-    [beginGame, cancelGeneration, config, preset, t, track],
+    [beginGame, cancelGeneration, config, preset, sessionKind, track],
+  );
+
+  const resolvePracticeActionFeedback = useCallback(
+    (
+      visibleState: VisibleBoardState,
+      boardAction: BoardAction,
+      coachAction: CoachAction,
+      cellIndex: number,
+      expectedPostStateHash: string,
+    ) => {
+      cancelCoachFeedbackAnalysis();
+      const requestId = coachFeedbackRequestRef.current;
+      const requestedHash = hashVisibleBoardState(visibleState);
+      const closeWorker = () => {
+        coachFeedbackWorkerRef.current?.terminate();
+        coachFeedbackWorkerRef.current = null;
+        if (coachFeedbackTimeoutRef.current !== null) {
+          window.clearTimeout(coachFeedbackTimeoutRef.current);
+          coachFeedbackTimeoutRef.current = null;
+        }
+      };
+      const finish = (suggestion: CoachSuggestion | null) => {
+        if (requestId !== coachFeedbackRequestRef.current) return;
+        closeWorker();
+        if (
+          suggestion === null ||
+          suggestion.requestId !== requestId ||
+          suggestion.stateHash !== requestedHash ||
+          gameRef.current.outcome !== "PLAYING" ||
+          hashGameState(gameRef.current) !== expectedPostStateHash
+        ) {
+          return;
+        }
+        const proven = boardAction === "CHORD"
+          ? isCoachChordProven(suggestion, visibleState, cellIndex)
+          : isCoachActionProven(suggestion, visibleState, coachAction, cellIndex);
+        if (proven) {
+          setNotice({ id: "practice.feedback.proven" });
+          return;
+        }
+        if (
+          suggestion.status !== "READY" &&
+          suggestion.status !== "NO_FORCED_MOVE"
+        ) {
+          return;
+        }
+        setNotice({
+          id: boardAction === "TOGGLE_FLAG"
+            ? "practice.feedback.flagUnproven"
+            : "practice.feedback.safeUnproven",
+        });
+      };
+
+      let worker: Worker;
+      try {
+        worker = new Worker(
+          new URL("../workers/practiceCoachWorker.ts", import.meta.url),
+          { type: "module" },
+        );
+      } catch {
+        return;
+      }
+      coachFeedbackWorkerRef.current = worker;
+      worker.onmessage = (event: MessageEvent<unknown>) => {
+        finish(parseCoachSuggestion(event.data));
+      };
+      worker.onerror = () => finish(null);
+      worker.onmessageerror = () => finish(null);
+      coachFeedbackTimeoutRef.current = window.setTimeout(
+        () => finish(null),
+        PRACTICE_COACH_TIMEOUT_MS,
+      );
+      try {
+        worker.postMessage(createCoachRequest(requestId, visibleState));
+      } catch {
+        finish(null);
+      }
+    },
+    [cancelCoachFeedbackAnalysis],
   );
 
   const handleBoardAction = useCallback(
@@ -926,23 +1263,24 @@ export function SoloGame({
       ) {
         return;
       }
-      setNotice("");
+      cancelCoachFeedbackAnalysis();
+      setNotice(null);
       const { physicalClicks } = inputMeta;
 
       if (status === "READY") {
         if (action === "TOGGLE_FLAG") {
           toggleFlag(current, cellIndex);
           setRevision((value) => value + 1);
-          setNotice(t("solo.initialFlags"));
+          setNotice({ id: "solo.initialFlags" });
           return;
         }
         if (action === "CHORD") {
           chordCell(current, cellIndex);
-          setNotice(t("solo.initialChord"));
+          setNotice({ id: "solo.initialChord" });
           return;
         }
         if (current.visibility[cellIndex] === CELL_FLAGGED) {
-          setNotice(t("solo.flaggedReveal"));
+          setNotice({ id: "solo.flaggedReveal" });
           return;
         }
 
@@ -964,53 +1302,502 @@ export function SoloGame({
           physicalClicks,
         });
         if (outcome === "PLAYING") {
-          setNotice(t("solo.classicStarted"));
+          setNotice({ id: "solo.classicStarted" });
         }
         return;
       }
 
-      const comboEligible =
-        action === "CHORD" ||
-        (action === "REVEAL" && isProvablySafeCell(current, cellIndex));
       const actionAt = performance.now();
       recordEffectiveInteraction(actionAt);
+      if (sessionKind === "GUIDED_PRACTICE") {
+        practiceLastInteractionAtRef.current = actionAt;
+        setDisplayedCoachSuggestion(null);
+      }
       const preStateHash = lastReplayStateHashRef.current;
+      const visibleBefore = sessionKind === "GUIDED_PRACTICE"
+        ? visibleBoardStateForPractice(current)
+        : null;
+      const suggestionBefore = coachAnalysisRef.current;
+      const expectedCoachAction: CoachAction = action === "TOGGLE_FLAG"
+        ? current.visibility[cellIndex] === CELL_FLAGGED
+          ? "UNFLAG"
+          : "FLAG"
+        : "REVEAL";
+      const followedProof = visibleBefore !== null && suggestionBefore !== null &&
+        (action === "CHORD"
+          ? isCoachChordProven(suggestionBefore, visibleBefore, cellIndex)
+          : isCoachActionProven(
+            suggestionBefore,
+            visibleBefore,
+            expectedCoachAction,
+            cellIndex,
+          ));
+      const coachAnalysisWasConclusive = visibleBefore !== null &&
+        suggestionBefore !== null &&
+        suggestionBefore.stateHash === hashVisibleBoardState(visibleBefore) &&
+        (suggestionBefore.status === "READY" ||
+          suggestionBefore.status === "NO_FORCED_MOVE");
       const delta =
         action === "REVEAL"
           ? revealCell(current, cellIndex)
           : action === "TOGGLE_FLAG"
             ? toggleFlag(current, cellIndex)
             : chordCell(current, cellIndex);
+      const postStateHash = hashGameState(current);
       recordAction(
         action,
         cellIndex,
         delta,
         preStateHash,
-        comboEligible,
-        physicalClicks,
+        {
+          physicalClicks,
+          comboActor: "PLAYER",
+          actionAt,
+        },
       );
       if (!delta.accepted) {
-        setNotice(
-          delta.rejectReason === "FLAG_COUNT_MISMATCH"
-            ? t("solo.chordRejected")
-            : t("solo.actionUnchanged"),
-        );
+        setNotice({
+          id: delta.rejectReason === "FLAG_COUNT_MISMATCH"
+            ? "solo.chordRejected"
+            : "solo.actionUnchanged",
+        });
+      } else if (sessionKind === "GUIDED_PRACTICE") {
+        if (followedProof) {
+          setNotice({ id: "practice.feedback.proven" });
+        } else if (
+          action !== "TOGGLE_FLAG" &&
+          delta.hitMine !== true &&
+          delta.revealed.some(({ value }) => value >= 0)
+        ) {
+          setNotice({
+            id: coachAnalysisWasConclusive
+              ? "practice.feedback.safeUnproven"
+              : "practice.feedback.notEvaluated",
+          });
+        } else if (action === "TOGGLE_FLAG") {
+          setNotice({
+            id: coachAnalysisWasConclusive
+              ? "practice.feedback.flagUnproven"
+              : "practice.feedback.notEvaluated",
+          });
+        }
+        if (
+          !followedProof &&
+          !coachAnalysisWasConclusive &&
+          visibleBefore !== null &&
+          (action === "TOGGLE_FLAG" || (
+            delta.hitMine !== true &&
+            delta.revealed.some(({ value }) => value >= 0)
+          ))
+        ) {
+          resolvePracticeActionFeedback(
+            visibleBefore,
+            action,
+            expectedCoachAction,
+            cellIndex,
+            postStateHash,
+          );
+        }
       }
       replaceGame(current);
       finishIfTerminal(current, actionAt);
     },
     [
       beginGame,
+      cancelCoachFeedbackAnalysis,
       config,
       finishIfTerminal,
       generateNoGuess,
       recordEffectiveInteraction,
       recordAction,
       replaceGame,
+      resolvePracticeActionFeedback,
+      sessionKind,
       status,
-      t,
     ],
   );
+
+  const showCoachSuggestion = useCallback(
+    (suggestion: CoachSuggestion, trigger: PracticeHintTrigger) => {
+      const current = gameRef.current;
+      if (sessionKind !== "GUIDED_PRACTICE" || current.outcome !== "PLAYING") {
+        return false;
+      }
+      const visible = visibleBoardStateForPractice(current);
+      const visibleStateHash = hashVisibleBoardState(visible);
+      if (suggestion.stateHash !== visibleStateHash) {
+        setNotice({ id: "practice.coach.stale" });
+        return false;
+      }
+      if (
+        trigger === "IDLE" &&
+        practiceShownStateHashesRef.current.has(visibleStateHash)
+      ) {
+        return false;
+      }
+      if (trigger === "IDLE") {
+        practiceShownStateHashesRef.current.add(visibleStateHash);
+      }
+      setDisplayedCoachSuggestion(suggestion);
+      appendPracticeEvent(
+        (seq, elapsedMs): PracticeAssistanceShownEventV1 => ({
+          eventType: "ASSISTANCE_SHOWN",
+          seq,
+          elapsedMs,
+          trigger,
+          visibleStateHash,
+          suggestion: structuredClone(suggestion),
+        }),
+      );
+      track("practice_hint_shown", {
+        trigger,
+        status: suggestion.status,
+        action: suggestion.action ?? "NONE",
+      });
+      return true;
+    },
+    [appendPracticeEvent, sessionKind, track],
+  );
+
+  const applyCoachAction = useCallback(
+    (
+      suggestion: CoachSuggestion,
+      trigger: PracticeCoachActionEventV1["trigger"],
+    ) => {
+      const current = gameRef.current;
+      if (sessionKind !== "GUIDED_PRACTICE" || current.outcome !== "PLAYING") {
+        return false;
+      }
+      cancelCoachFeedbackAnalysis();
+      const visible = visibleBoardStateForPractice(current);
+      if (!isCoachSuggestionApplicable(suggestion, visible)) return false;
+      if (
+        trigger === "AUTO_MARK" &&
+        (suggestion.action !== "FLAG" ||
+          practiceSuppressedAutoFlagsRef.current.has(suggestion.cellIndex!))
+      ) {
+        return false;
+      }
+      const action = suggestion.action!;
+      const cellIndex = suggestion.cellIndex!;
+      const proof = suggestion.proof!;
+      const preStateHash = hashGameState(current);
+      const actionAt = performance.now();
+      const delta = action === "REVEAL"
+        ? revealCell(current, cellIndex)
+        : toggleFlag(current, cellIndex);
+      if (!delta.accepted) return false;
+
+      appendPracticeEvent(
+        (seq, elapsedMs): PracticeCoachActionEventV1 => ({
+          eventType: "COACH_ACTION",
+          seq,
+          elapsedMs,
+          trigger,
+          action,
+          cellIndex,
+          physicalClicks: 0,
+          proof: structuredClone(proof),
+          preStateHash,
+          postStateHash: delta.stateHash,
+        }),
+        actionAt,
+      );
+      lastReplayStateHashRef.current = delta.stateHash;
+      practiceLastInteractionAtRef.current = actionAt;
+      if (trigger === "AUTO_MARK") {
+        practiceUsedAutoMarkRef.current = true;
+        setAutoFlaggedIndexes((currentIndexes) => {
+          const next = new Set(currentIndexes);
+          next.add(cellIndex);
+          return next;
+        });
+      } else if (action === "UNFLAG") {
+        setAutoFlaggedIndexes((currentIndexes) => {
+          if (!currentIndexes.has(cellIndex)) return currentIndexes;
+          const next = new Set(currentIndexes);
+          next.delete(cellIndex);
+          return next;
+        });
+      }
+      if (delta.revealed.some(({ value }) => value >= 0)) {
+        practiceSuppressedAutoFlagsRef.current.clear();
+      }
+
+      const safeReveals = delta.revealed.filter(({ value }) => value >= 0).length;
+      visualSequenceRef.current += 1;
+      setActionVisual({
+        id: visualSequenceRef.current,
+        actionType: action === "REVEAL" ? "REVEAL" : "TOGGLE_FLAG",
+        originIndex: cellIndex,
+        changedIndexes: [
+          ...delta.revealed.map(({ index }) => index),
+          ...(delta.flagged ? [delta.flagged.index] : []),
+        ],
+        accepted: true,
+        revealedSafeCount: safeReveals,
+      });
+      applyComboEvent({
+        type: "ACTION",
+        actor: "COACH",
+        action,
+        accepted: true,
+        safeCellsRevealed: safeReveals,
+        hitMine: delta.hitMine === true,
+        atMs: actionAt,
+      });
+      setDisplayedCoachSuggestion(null);
+      setCurrentCoachAnalysis(null);
+      track("practice_assist_applied", {
+        trigger,
+        action,
+      });
+      replaceGame(current);
+      finishIfTerminal(current, actionAt);
+      return true;
+    },
+    [
+      appendPracticeEvent,
+      applyComboEvent,
+      cancelCoachFeedbackAnalysis,
+      finishIfTerminal,
+      replaceGame,
+      sessionKind,
+      setCurrentCoachAnalysis,
+      track,
+    ],
+  );
+
+  const applyNextAutomaticMine = useCallback(
+    (suggestion: CoachSuggestion) => {
+      const current = gameRef.current;
+      if (current.outcome !== "PLAYING") return false;
+      const visible = visibleBoardStateForPractice(current);
+      const mineAction = coachMineActionsForApplication(suggestion, visible).find(
+        ({ cellIndex }) => !practiceSuppressedAutoFlagsRef.current.has(cellIndex),
+      );
+      if (!mineAction) return false;
+      return applyCoachAction(
+        {
+          ...suggestion,
+          action: "FLAG",
+          cellIndex: mineAction.cellIndex,
+          proof: mineAction.proof,
+        },
+        "AUTO_MARK",
+      );
+    },
+    [applyCoachAction],
+  );
+
+  const requestCoachAnalysis = useCallback(
+    (manualRequest = false) => {
+      const current = gameRef.current;
+      if (sessionKind !== "GUIDED_PRACTICE" || current.outcome !== "PLAYING") {
+        return;
+      }
+      if (manualRequest) practiceManualHintPendingRef.current = true;
+      cancelCoachAnalysis();
+      const visibleState = visibleBoardStateForPractice(current);
+      const requestedHash = hashVisibleBoardState(visibleState);
+      const requestId = coachRequestRef.current + 1;
+      coachRequestRef.current = requestId;
+      setCurrentCoachAnalysis(null);
+      setCoachTransportError(false);
+      setCoachBusy(true);
+
+      const finishWithTransportError = () => {
+        if (requestId !== coachRequestRef.current) return;
+        coachWorkerRef.current?.terminate();
+        coachWorkerRef.current = null;
+        if (coachTimeoutRef.current !== null) {
+          window.clearTimeout(coachTimeoutRef.current);
+          coachTimeoutRef.current = null;
+        }
+        setCoachBusy(false);
+        setCurrentCoachAnalysis(null);
+        setDisplayedCoachSuggestion(null);
+        setCoachTransportError(true);
+        practiceManualHintPendingRef.current = false;
+        setNotice({ id: "practice.coach.error" });
+      };
+
+      const finishWithSuggestion = (suggestion: CoachSuggestion) => {
+        if (requestId !== coachRequestRef.current) return;
+        coachWorkerRef.current?.terminate();
+        coachWorkerRef.current = null;
+        if (coachTimeoutRef.current !== null) {
+          window.clearTimeout(coachTimeoutRef.current);
+          coachTimeoutRef.current = null;
+        }
+        setCoachBusy(false);
+        const latest = gameRef.current;
+        if (latest.outcome !== "PLAYING") return;
+        const latestVisible = visibleBoardStateForPractice(latest);
+        if (
+          suggestion.requestId !== requestId ||
+          suggestion.stateHash !== requestedHash ||
+          suggestion.stateHash !== hashVisibleBoardState(latestVisible)
+        ) {
+          if (practiceManualHintPendingRef.current) {
+            practiceManualHintPendingRef.current = false;
+            setNotice({ id: "practice.coach.stale" });
+          }
+          return;
+        }
+        setCurrentCoachAnalysis(suggestion);
+        setCoachTransportError(false);
+        if (practiceManualHintPendingRef.current) {
+          practiceManualHintPendingRef.current = false;
+          showCoachSuggestion(suggestion, "REQUEST");
+          return;
+        }
+        if (suggestion.status === "ERROR" || suggestion.status === "CONTRADICTION") {
+          practiceShownStateHashesRef.current.add(suggestion.stateHash);
+          setDisplayedCoachSuggestion(suggestion);
+          setNotice({
+            id: suggestion.status === "ERROR"
+              ? "practice.coach.error"
+              : "practice.coach.contradiction",
+          });
+          return;
+        }
+        if (autoMarkMinesRef.current) {
+          applyNextAutomaticMine(suggestion);
+        }
+      };
+
+      let worker: Worker;
+      try {
+        worker = new Worker(
+          new URL("../workers/practiceCoachWorker.ts", import.meta.url),
+          { type: "module" },
+        );
+      } catch {
+        finishWithTransportError();
+        return;
+      }
+      coachWorkerRef.current = worker;
+      worker.onmessage = (event: MessageEvent<unknown>) => {
+        const suggestion = parseCoachSuggestion(event.data);
+        if (suggestion) finishWithSuggestion(suggestion);
+        else finishWithTransportError();
+      };
+      worker.onerror = () => {
+        finishWithTransportError();
+      };
+      worker.onmessageerror = () => {
+        finishWithTransportError();
+      };
+      coachTimeoutRef.current = window.setTimeout(() => {
+        finishWithTransportError();
+      }, PRACTICE_COACH_TIMEOUT_MS);
+      try {
+        worker.postMessage(createCoachRequest(requestId, visibleState));
+      } catch {
+        finishWithTransportError();
+      }
+    },
+    [
+      applyNextAutomaticMine,
+      cancelCoachAnalysis,
+      sessionKind,
+      setCurrentCoachAnalysis,
+      showCoachSuggestion,
+    ],
+  );
+
+  const requestImmediateHint = useCallback(() => {
+    const current = gameRef.current;
+    if (current.outcome !== "PLAYING") {
+      setNotice({ id: "practice.coach.waitingFirstMove" });
+      return;
+    }
+    const visible = visibleBoardStateForPractice(current);
+    const analysis = coachAnalysisRef.current;
+    if (analysis && analysis.stateHash === hashVisibleBoardState(visible)) {
+      showCoachSuggestion(analysis, "REQUEST");
+      return;
+    }
+    setNotice({ id: "practice.coach.analyzing" });
+    requestCoachAnalysis(true);
+  }, [requestCoachAnalysis, showCoachSuggestion]);
+
+  const demonstrateNextStep = useCallback(() => {
+    const current = gameRef.current;
+    if (current.outcome !== "PLAYING") {
+      setNotice({ id: "practice.coach.waitingFirstMove" });
+      return;
+    }
+    const suggestion = coachAnalysisRef.current;
+    if (!suggestion) {
+      setNotice({ id: "practice.demo.unavailable" });
+      requestCoachAnalysis(false);
+      return;
+    }
+    if (!applyCoachAction(suggestion, "DEMONSTRATE")) {
+      setNotice({ id: "practice.demo.actionFailed" });
+    }
+  }, [applyCoachAction, requestCoachAnalysis]);
+
+  const toggleAutoMarkMines = useCallback(() => {
+    const next = !autoMarkMinesRef.current;
+    autoMarkMinesRef.current = next;
+    setAutoMarkMines(next);
+    if (!next) return;
+    practiceUsedAutoMarkRef.current = true;
+    const suggestion = coachAnalysisRef.current;
+    if (suggestion) applyNextAutomaticMine(suggestion);
+  }, [applyNextAutomaticMine]);
+
+  useEffect(() => {
+    if (sessionKind !== "GUIDED_PRACTICE" || status !== "PLAYING") {
+      cancelCoachAnalysis();
+      setCurrentCoachAnalysis(null);
+      setDisplayedCoachSuggestion(null);
+      return;
+    }
+    setDisplayedCoachSuggestion(null);
+    setCoachIdleSeconds(8);
+    requestCoachAnalysis(false);
+    return cancelCoachAnalysis;
+  }, [
+    cancelCoachAnalysis,
+    requestCoachAnalysis,
+    revision,
+    sessionKind,
+    setCurrentCoachAnalysis,
+    status,
+  ]);
+
+  useEffect(() => {
+    if (
+      sessionKind !== "GUIDED_PRACTICE" ||
+      status !== "PLAYING" ||
+      coachAnalysis === null ||
+      practiceShownStateHashesRef.current.has(coachAnalysis.stateHash)
+    ) {
+      return;
+    }
+    const tick = () => {
+      if (document.visibilityState !== "visible") {
+        practiceLastInteractionAtRef.current = null;
+        setCoachIdleSeconds(8);
+        return;
+      }
+      const now = performance.now();
+      practiceLastInteractionAtRef.current ??= now;
+      const remainingMs = Math.max(
+        0,
+        PRACTICE_COACH_IDLE_MS - (now - practiceLastInteractionAtRef.current),
+      );
+      setCoachIdleSeconds(Math.max(0, Math.ceil(remainingMs / 1_000)));
+      if (remainingMs === 0) showCoachSuggestion(coachAnalysis, "IDLE");
+    };
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
+  }, [coachAnalysis, sessionKind, showCoachSuggestion, status]);
 
   const choosePreset = (
     nextPreset: Exclude<SoloPreset, "custom">,
@@ -1026,9 +1813,17 @@ export function SoloGame({
     persistPreferences(nextConfig, nextPreset);
   };
 
+  const chooseSessionKind = (nextSessionKind: SoloSessionKind) => {
+    const nextConfig = nextSessionKind === "GUIDED_PRACTICE"
+      ? { ...config, mode: "no_guess" as const }
+      : config;
+    resetBoard(nextConfig, preset, nextSessionKind);
+    persistPreferences(nextConfig, preset);
+  };
+
   const chooseMode = (nextMode: SoloGenerationMode) => {
     const nextConfig = { ...config, mode: nextMode };
-    const error = configErrorMessage(nextConfig);
+    const error = configErrorDescriptor(nextConfig);
     if (error) {
       setNotice(error);
       return;
@@ -1044,7 +1839,7 @@ export function SoloGame({
       mines: Number(draftMines),
       mode,
     };
-    const error = configErrorMessage(nextConfig);
+    const error = configErrorDescriptor(nextConfig);
     if (error) {
       setNotice(error);
       return;
@@ -1055,7 +1850,7 @@ export function SoloGame({
 
   const chooseCustom = () => {
     setPreset("custom");
-    setNotice(t("solo.customPrompt"));
+    setNotice({ id: "solo.customPrompt" });
   };
 
   const startConfiguredGame = () => {
@@ -1068,7 +1863,7 @@ export function SoloGame({
             mode,
           }
         : config;
-    const error = configErrorMessage(nextConfig);
+    const error = configErrorDescriptor(nextConfig);
     if (error) {
       setNotice(error);
       return;
@@ -1087,6 +1882,9 @@ export function SoloGame({
 
   const exitSolo = () => {
     cancelGeneration();
+    cancelCoachAnalysis();
+    cancelCoachFeedbackAnalysis();
+    clearCombo("EXIT_BOARD");
     onExit();
   };
 
@@ -1106,12 +1904,8 @@ export function SoloGame({
     try {
       saveSoloPreferences(preferences);
       return true;
-    } catch (cause) {
-      setNotice(
-        cause instanceof Error
-          ? cause.message
-          : t("solo.preferenceSaveFailed"),
-      );
+    } catch {
+      setNotice({ id: "solo.preferenceSaveFailed" });
       return false;
     }
   };
@@ -1148,12 +1942,147 @@ export function SoloGame({
       ? null
       : calculateIOE(board3BV, actionBreakdown.physicalClicks);
   const currentRunId = runIdentityRef.current?.runId ?? "";
-  const currentHistoryPending = getPendingHistoryWrites().some(
-    ({ record }) => record.recordId === currentRunId,
-  );
+  const currentHistoryPending = sessionKind === "STANDARD" &&
+    getPendingHistoryWrites().some(
+      ({ record }) => record.recordId === currentRunId,
+    );
+
   useEffect(() => {
     const runIdentity = runIdentityRef.current;
     if (
+      sessionKind !== "GUIDED_PRACTICE" ||
+      (status !== "WON" && status !== "LOST") ||
+      runIdentity === null ||
+      runCompletedAtRef.current === null ||
+      practiceSavedRunRef.current === runIdentity.runId
+    ) {
+      return;
+    }
+    practiceSavedRunRef.current = runIdentity.runId;
+    const boardSpec = boardSpecRef.current;
+    if (boardSpec === null) return;
+    const events = structuredClone(practiceEventsRef.current);
+    const replay: PracticeReplayV1 = {
+      schemaVersion: PRACTICE_REPLAY_SCHEMA_VERSION,
+      recordId: runIdentity.runId,
+      initialFlags: initialFlagsRef.current,
+      events,
+    };
+    const replayBytes = new TextEncoder().encode(JSON.stringify(replay)).byteLength;
+    if (
+      practiceEventsOverflowRef.current ||
+      replayBytes > SOLO_REPLAY_MAX_BYTES
+    ) {
+      setPracticeSaveState("TOO_LARGE");
+      setNotice({ id: "practice.result.replayTooLarge" });
+      track("practice_run_terminal", {
+        trainingSessionId: runIdentity.trainingSessionId,
+        preset,
+        generationMode: config.mode,
+        outcome: status,
+        elapsedMs,
+        playerActions: events.filter(({ eventType }) => eventType === "PLAYER_ACTION").length,
+        hintsShown: events.filter(({ eventType }) => eventType === "ASSISTANCE_SHOWN").length,
+        hintsRequested: events.filter((event) => event.eventType === "ASSISTANCE_SHOWN" && event.trigger === "REQUEST").length,
+        autoFlags: events.filter((event) => event.eventType === "COACH_ACTION" && event.trigger === "AUTO_MARK" && event.action === "FLAG").length,
+        demonstratedActions: events.filter((event) => event.eventType === "COACH_ACTION" && event.trigger === "DEMONSTRATE").length,
+        historySaved: false,
+        historyFailureReason: "REPLAY_LIMIT",
+      });
+      void flushTelemetry();
+      return;
+    }
+    const summary = {
+      elapsedMs,
+      playerActions: events.filter(({ eventType }) => eventType === "PLAYER_ACTION").length,
+      hintsShown: events.filter(({ eventType }) => eventType === "ASSISTANCE_SHOWN").length,
+      hintsRequested: events.filter((event) => event.eventType === "ASSISTANCE_SHOWN" && event.trigger === "REQUEST").length,
+      autoFlags: events.filter((event) => event.eventType === "COACH_ACTION" && event.trigger === "AUTO_MARK" && event.action === "FLAG").length,
+      demonstratedActions: events.filter((event) => event.eventType === "COACH_ACTION" && event.trigger === "DEMONSTRATE").length,
+    };
+    const record: PracticeRunRecordV1 = {
+      schemaVersion: 1,
+      kind: "GUIDED_PRACTICE",
+      recordId: runIdentity.runId,
+      completedAt: new Date(runCompletedAtRef.current).toISOString(),
+      outcome: status,
+      config: {
+        preset,
+        width: config.width,
+        height: config.height,
+        mines: config.mines,
+        generationMode: config.mode,
+      },
+      board: {
+        spec: boardSpec,
+        boardHash,
+        generatorRulesVersion: 1,
+        trustStatus: "LOCAL_UNVERIFIED",
+      },
+      assistMode: practiceUsedAutoMarkRef.current
+        ? "AUTO_MARK_MINES"
+        : "COACH",
+      summary,
+      replay: {
+        schemaVersion: PRACTICE_REPLAY_SCHEMA_VERSION,
+        eventCount: replay.events.length,
+        eventLogHash: hashPracticeReplay(replay),
+      },
+    };
+    setPracticeSaveState("SAVING");
+    void practiceHistoryStoreRef.current.put(record, replay).then(
+      (capacity) => {
+        if (!mountedRef.current || runIdentityRef.current?.runId !== runIdentity.runId) return;
+        setPracticeSaveState("SAVED");
+        setPracticeHistoryRefresh((value) => value + 1);
+        setNotice({ id: capacity.full ? "practice.history.full" : "practice.result.saved" });
+        track("practice_run_terminal", {
+          trainingSessionId: runIdentity.trainingSessionId,
+          preset,
+          generationMode: config.mode,
+          outcome: status,
+          ...summary,
+          historySaved: true,
+          historyFailureReason: null,
+        });
+        void flushTelemetry();
+      },
+      (error: unknown) => {
+        if (!mountedRef.current || runIdentityRef.current?.runId !== runIdentity.runId) return;
+        setPracticeSaveState("FAILED");
+        setNotice({
+          id: error instanceof PracticeHistoryCapacityError
+            ? "practice.history.full"
+            : "practice.result.saveFailed",
+        });
+        track("practice_run_terminal", {
+          trainingSessionId: runIdentity.trainingSessionId,
+          preset,
+          generationMode: config.mode,
+          outcome: status,
+          ...summary,
+          historySaved: false,
+          historyFailureReason: classifyHistoryFailure(error),
+        });
+        void flushTelemetry();
+      },
+    );
+  }, [
+    boardHash,
+    config,
+    elapsedMs,
+    flushTelemetry,
+    game.board,
+    preset,
+    sessionKind,
+    status,
+    track,
+  ]);
+
+  useEffect(() => {
+    const runIdentity = runIdentityRef.current;
+    if (
+      sessionKind !== "STANDARD" ||
       (status !== "WON" && status !== "LOST") ||
       runIdentity === null ||
       runCompletedAtRef.current === null ||
@@ -1302,9 +2231,10 @@ export function SoloGame({
               setIsNewPersonalBest(true);
             }
             if (result.capacity.warning) {
-              setNotice(
-                t("solo.historyCapacityNotice", { count: result.capacity.recordCount.toLocaleString() }),
-              );
+              setNotice({
+                id: "solo.historyCapacityNotice",
+                values: { count: result.capacity.recordCount.toLocaleString() },
+              });
             }
           }
           reportTerminal(true, null);
@@ -1321,15 +2251,134 @@ export function SoloGame({
     game.board,
     preset,
     seed,
+    sessionKind,
     status,
     flushTelemetry,
     track,
     t,
   ]);
-  const progress = Math.round(getProgress(game) * 100);
-  const failedPendingHistoryWrites = getPendingHistoryWrites().filter(
-    (pending) => pending.status === "failed",
+  const boardCoachOverlay = useMemo(
+    () => sessionKind === "GUIDED_PRACTICE"
+      ? {
+          ...(displayedCoachSuggestion?.proof
+            ? { sourceIndexes: displayedCoachSuggestion.proof.sources }
+            : {}),
+          ...(displayedCoachSuggestion?.cellIndex === undefined
+            ? {}
+            : { targetIndex: displayedCoachSuggestion.cellIndex }),
+          ...(displayedCoachSuggestion?.action === undefined
+            ? {}
+            : { action: displayedCoachSuggestion.action }),
+          autoFlaggedIndexes: [...autoFlaggedIndexes],
+        }
+      : undefined,
+    [autoFlaggedIndexes, displayedCoachSuggestion, sessionKind],
   );
+  const displayedCoachVisibleState = useMemo<VisibleBoardState | null>(() => {
+    if (
+      sessionKind !== "GUIDED_PRACTICE" ||
+      game.outcome !== "PLAYING" ||
+      displayedCoachSuggestion === null
+    ) {
+      return null;
+    }
+    const visible = visibleBoardStateForPractice(game);
+    return hashVisibleBoardState(visible) === displayedCoachSuggestion.stateHash
+      ? visible
+      : null;
+  }, [displayedCoachSuggestion, game, revision, sessionKind]);
+  const displayedProofConstraints = useMemo(() => {
+    const proof = displayedCoachSuggestion?.proof;
+    if (!proof || !displayedCoachVisibleState) return [];
+    return proof.sources.map((source) => ({
+      source,
+      clue: displayedCoachVisibleState.clues[source] ?? 0,
+      coveredCells: getNeighborIndices(
+        displayedCoachVisibleState.width,
+        displayedCoachVisibleState.height,
+        source,
+      ).filter((index) => (displayedCoachVisibleState.clues[index] ?? -1) < 0).length,
+    }));
+  }, [displayedCoachSuggestion, displayedCoachVisibleState]);
+  const progress = Math.round(getProgress(game) * 100);
+  const comboTier = getSoloComboTier(comboState.count);
+  const failedPendingHistoryWrites = sessionKind === "STANDARD"
+    ? getPendingHistoryWrites().filter(
+    (pending) => pending.status === "failed",
+      )
+    : [];
+  const practiceCoordinate = (cellIndex: number) => t("practice.coordinate", {
+    row: Math.floor(cellIndex / config.width) + 1,
+    column: (cellIndex % config.width) + 1,
+  });
+  const displayedProofUsesGlobalMineCount = Boolean(
+    displayedCoachSuggestion?.proof &&
+    (displayedCoachSuggestion.proof.rule.startsWith("GLOBAL") ||
+      displayedCoachSuggestion.proof.rule.startsWith("CSP")),
+  );
+  const displayedProofGlobalCalculation =
+    displayedProofUsesGlobalMineCount && displayedCoachVisibleState
+      ? t("practice.coach.globalValue", {
+          mines: displayedCoachVisibleState.totalMines,
+          covered: displayedCoachVisibleState.clues.filter((clue) => clue < 0).length,
+        })
+      : "";
+  const displayedProofSourceDescription = [
+    ...displayedProofConstraints.map(({ source, clue }) => t(
+      "practice.coach.sourceValue",
+      { coordinate: practiceCoordinate(source), clue },
+    )),
+    ...(displayedProofUsesGlobalMineCount ? [t("practice.coach.wholeBoard")] : []),
+  ].join(t("replay.listSeparator"));
+  const displayedProofCalculation = [
+    ...displayedProofConstraints.map(({ clue, coveredCells }) => t(
+      "practice.coach.constraintValue",
+      { clue, covered: coveredCells },
+    )),
+    ...(displayedProofGlobalCalculation ? [displayedProofGlobalCalculation] : []),
+  ].join(t("replay.listSeparator"));
+  const practiceActionDescription = (suggestion: CoachSuggestion) => {
+    if (suggestion.status === "ERROR") return t("practice.coach.error");
+    if (suggestion.status === "CONTRADICTION") return t("practice.coach.contradiction");
+    if (suggestion.status === "NO_FORCED_MOVE") return t("practice.coach.noMove");
+    if (suggestion.status === "PARTIAL" && suggestion.action === undefined) {
+      return t("practice.coach.partial");
+    }
+    if (suggestion.action === undefined || suggestion.cellIndex === undefined) {
+      return t("practice.coach.unavailable");
+    }
+    const coordinate = practiceCoordinate(suggestion.cellIndex);
+    return t(
+      suggestion.action === "FLAG"
+        ? "practice.action.flag"
+        : suggestion.action === "UNFLAG"
+          ? "practice.action.unflag"
+          : "practice.action.reveal",
+      { coordinate },
+    );
+  };
+  const practiceProofDescription = (proof: VisibleBoardProof) => {
+    const sources = proof.sources.map(practiceCoordinate).join(t("replay.listSeparator"));
+    if (proof.rule === "SINGLE_MINE") return t("practice.reason.singleMine", { sources });
+    if (proof.rule === "SINGLE_SAFE") return t("practice.reason.singleSafe", { sources });
+    if (proof.rule.startsWith("SUBSET")) return t("practice.reason.subset", { sources });
+    if (proof.rule.startsWith("GLOBAL")) return t("practice.reason.global");
+    return t("practice.reason.csp", { sources });
+  };
+  const coachPanelMessage = displayedCoachSuggestion
+    ? practiceActionDescription(displayedCoachSuggestion)
+    : status === "READY"
+      ? t("practice.coach.waitingFirstMove")
+      : coachTransportError
+        ? t("practice.coach.error")
+        : coachBusy || coachAnalysis === null
+        ? t("practice.coach.analyzing")
+        : practiceShownStateHashesRef.current.has(coachAnalysis.stateHash)
+          ? t("practice.coach.shownOnce")
+          : t("practice.coach.idleCountdown", { seconds: coachIdleSeconds });
+  const practiceAssistCount = practiceEventsRef.current.filter(
+    ({ eventType }) => eventType !== "PLAYER_ACTION",
+  ).length;
   const statusLabel =
     status === "READY"
       ? t("solo.status.ready")
@@ -1358,6 +2407,34 @@ export function SoloGame({
           <div className="solo-setup-section">
             <div className="solo-setup-heading">
               <span>01</span>
+              <div>
+                <strong>{t("practice.setup.sessionKind")}</strong>
+                <small>{t("practice.setup.help")}</small>
+              </div>
+            </div>
+            <div className="solo-mode-tabs practice-session-tabs">
+              <button
+                className={`solo-mode${sessionKind === "STANDARD" ? " is-active" : ""}`}
+                type="button"
+                aria-pressed={sessionKind === "STANDARD"}
+                onClick={() => chooseSessionKind("STANDARD")}
+              >
+                {t("practice.setup.standard")}
+              </button>
+              <button
+                className={`solo-mode${sessionKind === "GUIDED_PRACTICE" ? " is-active" : ""}`}
+                type="button"
+                aria-pressed={sessionKind === "GUIDED_PRACTICE"}
+                onClick={() => chooseSessionKind("GUIDED_PRACTICE")}
+              >
+                {t("practice.setup.guided")}
+              </button>
+            </div>
+          </div>
+
+          <div className="solo-setup-section">
+            <div className="solo-setup-heading">
+              <span>02</span>
               <div>
                 <strong>{t("solo.boardSpec")}</strong>
                 <small>{t("solo.boardSpecHelp")}</small>
@@ -1441,7 +2518,7 @@ export function SoloGame({
 
           <div className="solo-setup-section">
             <div className="solo-setup-heading">
-              <span>02</span>
+              <span>03</span>
               <div>
                 <strong>{t("solo.generation")}</strong>
                 <small>{t("solo.generationHelp")}</small>
@@ -1468,7 +2545,7 @@ export function SoloGame({
           <div className="solo-setup-section solo-setup-section-split">
             <div>
               <div className="solo-setup-heading">
-                <span>03</span>
+                <span>04</span>
                 <div>
                   <strong>{t("solo.dataLevel")}</strong>
                   <small>{t("solo.dataLevelHelp")}</small>
@@ -1496,7 +2573,7 @@ export function SoloGame({
             </div>
             <div>
               <div className="solo-setup-heading">
-                <span>04</span>
+                <span>05</span>
                 <div>
                   <strong>{t("solo.boardDisplay")}</strong>
                   <small>{t("solo.boardDisplayHelp")}</small>
@@ -1528,11 +2605,14 @@ export function SoloGame({
             <div>
               <span>{t("solo.runPlan")}</span>
               <strong>
+                {t(sessionKind === "GUIDED_PRACTICE" ? "practice.setup.guided" : "practice.setup.standard")} ·{" "}
                 {preset === "custom" ? t("solo.custom") : t(preset === "beginner" ? "solo.beginner" : preset === "intermediate" ? "solo.intermediate" : "solo.expert")} ·{" "}
                 {draftWidth}×{draftHeight} / {draftMines} ·{" "}
                 {mode === "no_guess" ? t("solo.noGuess") : t("solo.classic")}
               </strong>
-              <p role="status">{notice || t("solo.readyHelp")}</p>
+              <p role="status">
+                {notice ? t(notice.id, notice.values) : t("solo.readyHelp")}
+              </p>
             </div>
             <button className="primary-button" type="button" onClick={startConfiguredGame}>
               {t("solo.start")}
@@ -1560,12 +2640,17 @@ export function SoloGame({
       </a>
       <div className="solo-header">
         <div>
-          <span className="panel-kicker">{t("solo.kicker.game")}</span>
+          <span className="panel-kicker">
+            {t(sessionKind === "GUIDED_PRACTICE" ? "practice.setup.guided" : "solo.kicker.game")}
+          </span>
           <h1>{t("solo.gameTitle")}</h1>
           <p>
             {preset === "custom" ? t("solo.custom") : t(preset === "beginner" ? "solo.beginner" : preset === "intermediate" ? "solo.intermediate" : "solo.expert")} · {config.width}×{config.height} / {config.mines} ·{" "}
             {t(config.mode === "no_guess" ? "solo.noGuess" : "solo.classic")}
           </p>
+          {sessionKind === "GUIDED_PRACTICE" && (
+            <span className="practice-not-scored">{t("practice.notScored")}</span>
+          )}
         </div>
         <button className="secondary-button solo-exit" type="button" onClick={returnToSetup}>
           {t(status === "PLAYING" || status === "GENERATING" ? "solo.endAndChange" : "solo.changeConfig")}
@@ -1582,16 +2667,23 @@ export function SoloGame({
             <span>{t("solo.control.reveal")}</span>
             <span>{t("solo.control.flag")}</span>
             <span>{t("solo.control.chord")}</span>
-            <span>{config.mode === "no_guess" ? "NO-GUESS" : "CLASSIC"}</span>
+            <span>{t(config.mode === "no_guess" ? "solo.mode.noGuess" : "solo.mode.classic")}</span>
+            {sessionKind === "GUIDED_PRACTICE" && (
+              <span>{t("practice.notScored")}</span>
+            )}
           </div>
           <CanvasBoard
             {...(actionVisual === undefined ? {} : { actionVisual })}
+            {...(sessionKind === "GUIDED_PRACTICE"
+              ? { ariaDescribedBy: "practice-coach-announcement" }
+              : {})}
             boardTheme={boardTheme}
             disabled={
               status === "GENERATING" || status === "WON" || status === "LOST"
             }
             effectsProfile={effectsProfile}
             game={game}
+            coachOverlay={boardCoachOverlay}
             reducedMotion={reducedMotion}
             revision={revision}
             showTerminalMines
@@ -1604,14 +2696,22 @@ export function SoloGame({
             }}
           />
 
-          {combo >= 3 && (
+          {comboTier > 0 && (
             <div
-              className={`flow-combo combo-${Math.min(combo, 12)}`}
+              key={comboState.count}
+              className={`flow-combo combo-${comboTier}`}
               aria-live="polite"
+              aria-atomic="true"
             >
               <span>{t("solo.flowCombo")}</span>
-              <strong>×{combo}</strong>
-              <em>{t(combo >= 12 ? "solo.combo.max" : combo >= 8 ? "solo.combo.high" : combo >= 5 ? "solo.combo.medium" : "solo.combo.low")}</em>
+              <strong>×{comboState.count}</strong>
+              <em>{t(comboTier >= 12 ? "solo.combo.max" : comboTier >= 8 ? "solo.combo.high" : comboTier >= 4 ? "solo.combo.medium" : "solo.combo.low")}</em>
+              <div className="flow-combo-progress" aria-hidden="true">
+                <div
+                  key={`${comboState.count}-${comboState.lastIncrementAtMs}`}
+                  style={{ animationDuration: `${SOLO_COMBO_WINDOW_MS}ms` }}
+                />
+              </div>
             </div>
           )}
 
@@ -1626,17 +2726,107 @@ export function SoloGame({
         </div>
 
         <aside className="solo-side-panel">
+          {sessionKind === "GUIDED_PRACTICE" && (
+            <section className="practice-coach-panel" aria-labelledby="practice-coach-title">
+              <div className="practice-coach-heading">
+                <div>
+                  <span className="panel-kicker">{t("practice.setup.guided")}</span>
+                  <h2 id="practice-coach-title">{t("practice.coach.title")}</h2>
+                </div>
+                <span className={`practice-coach-state${coachBusy ? " is-busy" : ""}`} aria-hidden="true" />
+              </div>
+              <p>{t("practice.coach.description")}</p>
+              <div
+                id="practice-coach-announcement"
+                className="practice-coach-message"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {coachPanelMessage}
+                {displayedCoachSuggestion?.proof && (
+                  <span className="visually-hidden">
+                    {` ${practiceProofDescription(displayedCoachSuggestion.proof)} ${
+                      displayedProofCalculation
+                    }`}
+                  </span>
+                )}
+              </div>
+              {displayedCoachSuggestion?.proof && displayedCoachSuggestion.cellIndex !== undefined && (
+                <dl className="practice-coach-proof">
+                  <div>
+                    <dt>{t("practice.coach.target")}</dt>
+                    <dd>{practiceCoordinate(displayedCoachSuggestion.cellIndex)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("practice.coach.source")}</dt>
+                    <dd>
+                      {displayedProofSourceDescription || t("practice.coach.wholeBoard")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("practice.coach.calculation")}</dt>
+                    <dd>
+                      {displayedProofCalculation || "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("practice.coach.proof")}</dt>
+                    <dd>{practiceProofDescription(displayedCoachSuggestion.proof)}</dd>
+                  </div>
+                </dl>
+              )}
+              <div className="practice-coach-actions">
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
+                  onClick={requestImmediateHint}
+                >
+                  {t("practice.coach.hintNow")}
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
+                  onClick={demonstrateNextStep}
+                >
+                  {t("practice.coach.demonstrate")}
+                </button>
+              </div>
+              <label className="practice-auto-mark">
+                <input
+                  type="checkbox"
+                  checked={autoMarkMines}
+                  disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
+                  onChange={toggleAutoMarkMines}
+                />
+                <span>
+                  <strong>{t("practice.coach.autoMark")}</strong>
+                  <small>{t("practice.coach.autoMarkHelp")}</small>
+                </span>
+              </label>
+            </section>
+          )}
           {(status === "WON" || status === "LOST") && (
             <section className="solo-terminal-panel" role="status" aria-live="assertive">
               <span className="panel-kicker">{t("solo.kicker.result")}</span>
               <h2>{t(status === "WON" ? "solo.result.won" : "solo.result.lost")}</h2>
               <p>{formatSoloTime(elapsedMs)} · {t("solo.resultActions", { count: actionBreakdown.semanticActions })}</p>
-              <div className="solo-result-metrics">
-                <span>{t(isNewPersonalBest ? "solo.newPersonalBestLocal" : "solo.localUnverified")}</span>
-                <b>3BV {board3BV ?? "—"}</b>
-                <b>3BV/s {formatMetric(threeBvPerSecond)}</b>
-                <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
-              </div>
+              {sessionKind === "GUIDED_PRACTICE" ? (
+                <div className="solo-result-metrics practice-result-metrics">
+                  <span>{t("practice.notScored")}</span>
+                  <b>{t("practice.history.playerActions")} {actionBreakdown.semanticActions}</b>
+                  <b>{t("practice.history.assists")} {practiceAssistCount}</b>
+                </div>
+              ) : (
+                <div className="solo-result-metrics">
+                  <span>{t(isNewPersonalBest ? "solo.newPersonalBestLocal" : "solo.localUnverified")}</span>
+                  <b>3BV {board3BV ?? "—"}</b>
+                  <b>3BV/s {formatMetric(threeBvPerSecond)}</b>
+                  <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
+                </div>
+              )}
               <div className="solo-terminal-legend" aria-label={t("solo.legend.aria")}>
                 <span>{t("solo.legend.detonated")}</span>
                 <span>{t("solo.legend.mine")}</span>
@@ -1644,7 +2834,15 @@ export function SoloGame({
                 <span>{t("solo.legend.wrongFlag")}</span>
               </div>
               <div className="result-actions">
-                {currentHistoryPending ? (
+                {sessionKind === "GUIDED_PRACTICE" ? (
+                  practiceSaveState === "SAVING" ? (
+                    <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
+                  ) : practiceSaveState === "SAVED" ? (
+                    <a className="primary-button" href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("solo.analyze")}</a>
+                  ) : (
+                    <a className="primary-button" href="#practice-history">{t("practice.result.history")}</a>
+                  )
+                ) : currentHistoryPending ? (
                   <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
                 ) : (
                   <a className="primary-button" href={`#/solo/replay/${encodeURIComponent(currentRunId)}`}>{t("solo.analyze")}</a>
@@ -1680,15 +2878,17 @@ export function SoloGame({
                 {config.width}×{config.height}
               </strong>
             </div>
-            <div>
-              <span>{t("solo.currentBest")}</span>
-              <strong>
-                {currentRulesPersonalBestMs === null
-                  ? "—"
-                  : formatSoloTime(currentRulesPersonalBestMs)}
-              </strong>
-            </div>
-            {legacyPersonalBestMs !== null && (
+            {sessionKind === "STANDARD" && (
+              <div>
+                <span>{t("solo.currentBest")}</span>
+                <strong>
+                  {currentRulesPersonalBestMs === null
+                    ? "—"
+                    : formatSoloTime(currentRulesPersonalBestMs)}
+                </strong>
+              </div>
+            )}
+            {sessionKind === "STANDARD" && legacyPersonalBestMs !== null && (
               <div>
                 <span>{t("solo.legacyBest")}</span>
                 <strong>{formatSoloTime(legacyPersonalBestMs)}</strong>
@@ -1700,7 +2900,7 @@ export function SoloGame({
             </div>
           </div>
 
-          {statsLevel !== "basic" && (
+          {sessionKind === "STANDARD" && statsLevel !== "basic" && (
             <div className="solo-stats solo-stats-advanced">
               <div>
                 <span>{coarsePointer ? t("solo.actionsPerSecond") : "CPS / Cl/s"}</span>
@@ -1748,13 +2948,13 @@ export function SoloGame({
           </div>
 
           <div className="solo-notice" aria-live="polite">
-            {notice || t("solo.mantra")}
+            {notice ? t(notice.id, notice.values) : t("solo.mantra")}
           </div>
 
           {(seed || generationSummary) && (
             <div className="solo-proof">
               <span>{t("solo.boardAudit")}</span>
-              {generationSummary && <b>{generationSummary}</b>}
+              {generationSummary && <b>{t(generationSummary.id, generationSummary.values)}</b>}
               {boardHash && <code>{boardHash.slice(0, 16)}</code>}
               {seed && <small title={seed}>{seed.slice(-18)}</small>}
             </div>
@@ -1792,16 +2992,23 @@ export function SoloGame({
           </button>
         </div>
       ))}
-      <SoloHistory
-        config={config}
-        preset={preset}
-        metricRulesVersion={SOLO_METRIC_RULES_VERSION}
-        gameRulesVersion={SOLO_GAME_RULES_VERSION}
-        refreshToken={pendingWriteVersion}
-        store={historyStoreRef.current}
-        onCurrentBestChange={handleCurrentBestChange}
-        onLegacyPersonalBestChange={handleLegacyPersonalBestChange}
-      />
+      {sessionKind === "GUIDED_PRACTICE" ? (
+        <PracticeHistory
+          refreshToken={practiceHistoryRefresh}
+          store={practiceHistoryStoreRef.current}
+        />
+      ) : (
+        <SoloHistory
+          config={config}
+          preset={preset}
+          metricRulesVersion={SOLO_METRIC_RULES_VERSION}
+          gameRulesVersion={SOLO_GAME_RULES_VERSION}
+          refreshToken={pendingWriteVersion}
+          store={historyStoreRef.current}
+          onCurrentBestChange={handleCurrentBestChange}
+          onLegacyPersonalBestChange={handleLegacyPersonalBestChange}
+        />
+      )}
     </section>
   );
 }

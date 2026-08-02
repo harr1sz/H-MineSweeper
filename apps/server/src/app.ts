@@ -94,14 +94,11 @@ const telemetrySessionSchema = {
   },
 } as const;
 
-const telemetryPropertySchema = {
-  anyOf: [
-    { type: "string", maxLength: 64 },
-    { type: "number" },
-    { type: "boolean" },
-    { type: "null" },
-  ],
-} as const;
+// Keep property values untouched until the event-aware sanitizer runs. Ajv's
+// scalar coercion mutates number, boolean, and null values when they are
+// expressed as an anyOf union, which would make valid telemetry fail its
+// stricter server-side event contract.
+const telemetryPropertySchema = {} as const;
 
 const telemetryBatchSchema = {
   type: "object",

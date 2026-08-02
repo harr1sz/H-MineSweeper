@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { getNeighborIndices } from "@h-minesweeper/game-core";
+import {
+  getNeighborIndices,
+  type VisibleAnalysisStatus,
+  type VisibleBoardProof,
+} from "@h-minesweeper/game-core";
 import { createIndexedDbSoloHistoryStore, type SoloReplayV1, type SoloRunRecordV2 } from "../lib/solo-history";
 import type { ReplayWorkerResponse } from "../workers/replayWorker";
 import {
@@ -44,6 +48,27 @@ const VERDICT_MESSAGE_IDS: Readonly<Record<ReviewStepVerdict, MessageId>> = {
   CORRECT_WRONG_FLAG_REMOVED: "replay.verdict.correctUnflag",
   PROVABLE_MINE_UNFLAGGED: "replay.verdict.mineUnflagged",
   UNDETERMINED_FLAG_REMOVED: "replay.verdict.undeterminedUnflag",
+};
+
+const ANALYSIS_STATUS_MESSAGE_IDS: Readonly<
+  Record<VisibleAnalysisStatus, MessageId>
+> = {
+  COMPLETE: "replay.analysisStatus.complete",
+  PARTIAL: "replay.analysisStatus.partial",
+  CONTRADICTION: "replay.analysisStatus.contradiction",
+};
+
+const PROOF_RULE_MESSAGE_IDS: Readonly<
+  Record<VisibleBoardProof["rule"], MessageId>
+> = {
+  SINGLE_MINE: "replay.rule.singleMine",
+  SINGLE_SAFE: "replay.rule.singleSafe",
+  SUBSET_MINE: "replay.rule.subsetMine",
+  SUBSET_SAFE: "replay.rule.subsetSafe",
+  GLOBAL_MINE: "replay.rule.globalMine",
+  GLOBAL_SAFE: "replay.rule.globalSafe",
+  CSP_MINE: "replay.rule.cspMine",
+  CSP_SAFE: "replay.rule.cspSafe",
 };
 
 function conceptForMoment(moment: ReviewMoment): string {
@@ -345,8 +370,12 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
           <details className="replay-technical-details">
             <summary>{t("replay.technicalDetails")}</summary>
             <dl>
-              <dt>{t("replay.technical.status")}</dt><dd>{selectedStep?.before.status}</dd>
-              <dt>{t("replay.technical.rule")}</dt><dd>{selectedExplanation.targetProof?.rule ?? "—"}</dd>
+              <dt>{t("replay.technical.status")}</dt><dd>{selectedStep
+                ? t(ANALYSIS_STATUS_MESSAGE_IDS[selectedStep.before.status])
+                : "—"}</dd>
+              <dt>{t("replay.technical.rule")}</dt><dd>{selectedExplanation.targetProof
+                ? t(PROOF_RULE_MESSAGE_IDS[selectedExplanation.targetProof.rule])
+                : "—"}</dd>
               <dt>{t("replay.technical.proofs")}</dt><dd>{selectedStep?.before.proofs.length ?? 0}</dd>
               <dt>{t("replay.technical.nodes")}</dt><dd>{selectedStep?.before.searchedNodes ?? 0}</dd>
               <dt>{t("replay.technical.hash")}</dt><dd><code>{selectedStep?.before.stateHash}</code></dd>

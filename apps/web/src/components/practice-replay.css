@@ -1,0 +1,12 @@
+.practice-replay-not-scored {
+  width: fit-content;
+  margin: 8px 0 14px;
+  border: 1px solid rgb(240 196 106 / 42%);
+  color: var(--gold);
+  padding: 8px 10px;
+  font: 700 9px var(--mono);
+}
+
+.practice-replay-shell .replay-explanation h2 {
+  margin-bottom: 18px;
+}

@@ -25,7 +25,11 @@ export interface SoloPreferencesV1 {
 
 export interface SoloPreferenceLoadResult {
   readonly preferences: SoloPreferencesV1 | null;
-  readonly error: string | null;
+  readonly errorCode:
+    | "INVALID_VERSION"
+    | "CORRUPT_DATA"
+    | "READ_FAILED"
+    | null;
 }
 
 export interface ResolvedSoloLaunchPreferences {
@@ -97,23 +101,22 @@ export function loadSoloPreferences(
 ): SoloPreferenceLoadResult {
   try {
     const raw = storage?.getItem(SOLO_PREFERENCES_KEY);
-    if (!raw) return { preferences: null, error: null };
+    if (!raw) return { preferences: null, errorCode: null };
     const parsed: unknown = JSON.parse(raw);
     if (!isSoloPreferencesV1(parsed)) {
       return {
         preferences: null,
-        error:
-          "已保存的单人偏好版本无效，已使用安全默认值；原存储内容未自动删除。",
+        errorCode: "INVALID_VERSION",
       };
     }
-    return { preferences: parsed, error: null };
+    return { preferences: parsed, errorCode: null };
   } catch (cause) {
     return {
       preferences: null,
-      error:
+      errorCode:
         cause instanceof SyntaxError
-          ? "已保存的单人偏好损坏，已使用安全默认值；原存储内容未自动删除。"
-          : "无法读取单人偏好，已使用安全默认值；请检查浏览器存储权限。",
+          ? "CORRUPT_DATA"
+          : "READ_FAILED",
     };
   }
 }
@@ -123,13 +126,13 @@ export function saveSoloPreferences(
   storage: Pick<Storage, "setItem"> | undefined = globalThis.localStorage,
 ): void {
   if (!isSoloPreferencesV1(preferences)) {
-    throw new TypeError("拒绝保存无效的单人偏好。");
+    throw new TypeError("INVALID_SOLO_PREFERENCES");
   }
   try {
     if (!storage) throw new Error("localStorage unavailable");
     storage.setItem(SOLO_PREFERENCES_KEY, JSON.stringify(preferences));
   } catch (cause) {
-    throw new Error("单人偏好未能保存；本局可继续，但下次可能恢复为默认值。", {
+    throw new Error("SOLO_PREFERENCES_SAVE_FAILED", {
       cause,
     });
   }

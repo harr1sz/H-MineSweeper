@@ -1,13 +1,46 @@
 import { describe, expect, it } from "vitest";
 import {
+  drawBoardCoachOverlay,
   normalizeChangedIndexes,
   resolveBoardAvailableWidth,
+  resolveBoardCoachOverlay,
   resolveBoardMarkMetrics,
   resolveBoardPalette,
   resolveCanvasPixelRatio,
   resolveResponsiveCellSize,
   shouldRedrawWholeBoard,
 } from "./CanvasBoard";
+
+function recordingContext(): {
+  readonly context: CanvasRenderingContext2D;
+  readonly operations: string[];
+} {
+  const operations: string[] = [];
+  const context = {
+    globalAlpha: 1,
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    lineCap: "butt",
+    lineJoin: "miter",
+    save: () => operations.push("save"),
+    restore: () => operations.push("restore"),
+    beginPath: () => operations.push("beginPath"),
+    closePath: () => operations.push("closePath"),
+    fill: () => operations.push("fill"),
+    stroke: () => operations.push("stroke"),
+    setLineDash: (segments: readonly number[]) => operations.push(`dash:${segments.join(",")}`),
+    fillRect: (x: number, y: number, width: number, height: number) =>
+      operations.push(`fillRect:${x},${y},${width},${height}`),
+    strokeRect: (x: number, y: number, width: number, height: number) =>
+      operations.push(`strokeRect:${x},${y},${width},${height}`),
+    arc: (x: number, y: number, radius: number) =>
+      operations.push(`arc:${x},${y},${radius}`),
+    moveTo: (x: number, y: number) => operations.push(`moveTo:${x},${y}`),
+    lineTo: (x: number, y: number) => operations.push(`lineTo:${x},${y}`),
+  } as unknown as CanvasRenderingContext2D;
+  return { context, operations };
+}
 
 describe("CanvasBoard rendering helpers", () => {
   it("normalizes authoritative changed indexes without reordering them", () => {
@@ -78,7 +111,7 @@ describe("CanvasBoard rendering helpers", () => {
     expect(resolveResponsiveCellSize(900, 30, false)).toBe(30);
   });
 
-  it("caps high-DPI backing stores for large two-layer boards", () => {
+  it("caps high-DPI backing stores for large layered boards", () => {
     expect(resolveCanvasPixelRatio(270, 270, 2)).toBe(2);
     expect(resolveCanvasPixelRatio(1_800, 1_800, 2)).toBeCloseTo(
       Math.sqrt(4_000_000 / (1_800 * 1_800)),
@@ -88,5 +121,104 @@ describe("CanvasBoard rendering helpers", () => {
       Math.sqrt(4_000_000 / (4_400 * 4_400)),
     );
     expect(resolveCanvasPixelRatio(0, 1_800, 2)).toBe(1);
+  });
+
+  it("normalizes coach sources, one target, and coach-created flags", () => {
+    expect(resolveBoardCoachOverlay({
+      sourceIndexes: [7, -1, 0, 7, 5],
+      targetIndex: 5,
+      action: "FLAG",
+      autoFlaggedIndexes: [2, 2, 9, 3],
+    }, 4, 2)).toEqual({
+      sourceIndexes: [0, 7],
+      targetIndex: 5,
+      action: "FLAG",
+      autoFlaggedIndexes: [2, 3],
+    });
+    expect(resolveBoardCoachOverlay({
+      sourceIndexes: [0],
+      targetIndex: 99,
+      action: "REVEAL",
+      autoFlaggedIndexes: [1],
+    }, 2, 2)).toEqual({
+      sourceIndexes: [],
+      targetIndex: null,
+      action: null,
+      autoFlaggedIndexes: [1],
+    });
+  });
+
+  it("bounds coach overlay work on 10,000-cell boards", () => {
+    const resolved = resolveBoardCoachOverlay({
+      sourceIndexes: Array.from({ length: 10_000 }, (_, index) => index),
+      targetIndex: 5_050,
+      action: "REVEAL",
+      autoFlaggedIndexes: Array.from({ length: 10_000 }, (_, index) => index),
+    }, 100, 100);
+    expect(resolved.sourceIndexes).toHaveLength(64);
+    expect(resolved.sourceIndexes).not.toContain(5_050);
+    expect(resolved.autoFlaggedIndexes).toHaveLength(256);
+  });
+
+  it("draws static source, target, and auto-flag marks without board truth", () => {
+    const first = recordingContext();
+    const overlay = {
+      sourceIndexes: [0, 5],
+      targetIndex: 1,
+      action: "FLAG" as const,
+      autoFlaggedIndexes: [3],
+    };
+    const firstSummary = drawBoardCoachOverlay(
+      first.context,
+      overlay,
+      3,
+      2,
+      20,
+      resolveBoardPalette("black-gold"),
+    );
+    expect(firstSummary).toEqual({
+      sourceCount: 2,
+      targetDrawn: true,
+      autoFlaggedCount: 1,
+    });
+    expect(first.operations.filter((operation) => operation.startsWith("strokeRect")))
+      .toHaveLength(4);
+
+    // There is no time input or animated phase: reduced-motion rendering can
+    // call the same helper and receive an identical static command sequence.
+    const second = recordingContext();
+    drawBoardCoachOverlay(
+      second.context,
+      overlay,
+      3,
+      2,
+      20,
+      resolveBoardPalette("black-gold"),
+    );
+    expect(second.operations).toEqual(first.operations);
+  });
+
+  it("redraws a changed coach target at its new canvas coordinates", () => {
+    const first = recordingContext();
+    const second = recordingContext();
+    const palette = resolveBoardPalette("classic");
+    drawBoardCoachOverlay(
+      first.context,
+      { targetIndex: 1, action: "REVEAL" },
+      3,
+      2,
+      20,
+      palette,
+    );
+    drawBoardCoachOverlay(
+      second.context,
+      { targetIndex: 4, action: "REVEAL" },
+      3,
+      2,
+      20,
+      palette,
+    );
+    expect(first.operations).toContain("strokeRect:22,2,16,16");
+    expect(second.operations).toContain("strokeRect:22,22,16,16");
   });
 });

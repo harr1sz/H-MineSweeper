@@ -1122,6 +1122,11 @@ interface Constraint {
 
 interface Deduction {
   readonly rule: Exclude<SolverRule, "INITIAL_SAFE">;
+  /**
+   * Revealed clues used by the proof. CSP proofs retain every constraint
+   * supplied to the global search; the total mine count is an additional
+   * implicit source and must be explained by consumers.
+   */
   readonly sources: readonly number[];
   readonly targets: readonly number[];
   readonly kind: "SAFE" | "MINE";
@@ -1406,7 +1411,20 @@ export function analyzeVisibleBoard(
   }
   const local = collectDeductions(constraints);
   const hidden = state.clues.flatMap((clue, index) => clue < 0 ? [index] : []);
+  const hiddenSet = new Set(hidden);
+  const claims = [...new Set(state.playerClaims)];
+  const claimSet = new Set(claims);
   const proofs: VisibleBoardProof[] = local.map((proof) => ({ ...proof, stateHash }));
+  let claimContradictionProven =
+    claims.some((index) => !Number.isSafeInteger(index) || !hiddenSet.has(index)) ||
+    claims.length > state.totalMines ||
+    constraints.some((constraint) =>
+      constraint.cells.filter((cell) => claimSet.has(cell)).length >
+        constraint.remainingMines
+    ) ||
+    local.some((proof) =>
+      proof.kind === "SAFE" && proof.targets.some((target) => claimSet.has(target))
+    );
   if (state.totalMines > hidden.length) {
     return { status: "CONTRADICTION", proofs, searchedNodes: 0, stateHash };
   }
@@ -1416,7 +1434,12 @@ export function analyzeVisibleBoard(
       sources: [], targets: hidden,
       kind: state.totalMines === 0 ? "SAFE" : "MINE", stateHash,
     });
-    return { status: "COMPLETE", proofs, searchedNodes: 0, stateHash };
+    return {
+      status: claimContradictionProven ? "CONTRADICTION" : "COMPLETE",
+      proofs,
+      searchedNodes: 0,
+      stateHash,
+    };
   }
 
   const frontier = [...new Set(constraints.flatMap((item) => item.cells))]
@@ -1425,11 +1448,18 @@ export function analyzeVisibleBoard(
   const frontierSet = new Set(frontier);
   const unconstrained = hidden.filter((cell) => !frontierSet.has(cell));
   const unconstrainedCount = unconstrained.length;
+  const unconstrainedSet = new Set(unconstrained);
+  const unconstrainedClaimCount = claims.filter((cell) => unconstrainedSet.has(cell)).length;
+  const frontierClaimPositions = claims.flatMap((cell) => {
+    const position = frontierPosition.get(cell);
+    return position === undefined ? [] : [position];
+  });
   const values = new Uint8Array(frontier.length);
   const mineSeen = new Uint8Array(frontier.length);
   const safeSeen = new Uint8Array(frontier.length);
   let searchedNodes = 0;
   let solutions = 0;
+  let claimCompatibleSolutions = 0;
   const unconstrainedMineCounts = new Set<number>();
   let exhausted = false;
   const search = (position: number, assignedMines: number): void => {
@@ -1449,7 +1479,14 @@ export function analyzeVisibleBoard(
     if (position === frontier.length) {
       if (assignedMines > state.totalMines || assignedMines + unconstrainedCount < state.totalMines) return;
       solutions += 1;
-      unconstrainedMineCounts.add(state.totalMines - assignedMines);
+      const unconstrainedMines = state.totalMines - assignedMines;
+      unconstrainedMineCounts.add(unconstrainedMines);
+      if (
+        frontierClaimPositions.every((claimPosition) => values[claimPosition] === 1) &&
+        unconstrainedMines >= unconstrainedClaimCount
+      ) {
+        claimCompatibleSolutions += 1;
+      }
       for (let index = 0; index < values.length; index += 1) {
         if (values[index] === 1) mineSeen[index] = 1;
         else safeSeen[index] = 1;
@@ -1472,7 +1509,10 @@ export function analyzeVisibleBoard(
         const kind = mineSeen[index] === 0 ? "SAFE" : "MINE";
         proofs.push({
           rule: kind === "SAFE" ? "CSP_SAFE" : "CSP_MINE",
-          sources: constraints.filter((item) => item.cells.includes(target)).map((item) => item.source),
+          // The search is global: a distant constraint can change how the
+          // total mine count is allocated and therefore force this target.
+          // Listing only adjacent clues would produce an incomplete proof.
+          sources: constraints.map((item) => item.source),
           targets: [target], kind, stateHash,
         });
       }
@@ -1492,8 +1532,15 @@ export function analyzeVisibleBoard(
       });
     }
   }
+  if (!exhausted && claimCompatibleSolutions === 0) {
+    claimContradictionProven = true;
+  }
   return {
-    status: exhausted ? "PARTIAL" : "COMPLETE",
+    status: claimContradictionProven
+      ? "CONTRADICTION"
+      : exhausted
+        ? "PARTIAL"
+        : "COMPLETE",
     proofs,
     searchedNodes: Math.min(searchedNodes, nodeBudget),
     stateHash,

@@ -17,10 +17,15 @@ export const TELEMETRY_EVENT_NAMES = [
   "mode_selected",
   "solo_run_started",
   "solo_run_terminal",
+  "practice_run_started",
+  "practice_hint_shown",
+  "practice_assist_applied",
+  "practice_run_terminal",
   "solo_history_opened",
   "solo_history_filtered",
   "solo_exported",
   "no_guess_generation_finished",
+  "practice_no_guess_generation_finished",
   "duel_invite_created",
   "duel_invite_opened",
   "duel_joined",
@@ -1369,7 +1374,7 @@ const ENUM_PROPERTIES: Readonly<Record<string, ReadonlySet<string>>> = {
     "768_1279",
     "gte_1280",
   ]),
-  mode: new Set(["solo", "academy", "duel", "history"]),
+  mode: new Set(["solo", "guided_practice", "academy", "duel", "history"]),
   source: new Set(["home", "navigation", "result", "invite", "direct"]),
   preset: new Set(["beginner", "intermediate", "expert", "custom"]),
   generationMode: new Set(["classic", "no_guess"]),
@@ -1391,6 +1396,110 @@ const ENUM_PROPERTIES: Readonly<Record<string, ReadonlySet<string>>> = {
     "GENERATION_ERROR",
   ]),
   reason: new Set(["TIMEOUT", "DISCONNECTED", "STATE_DIVERGED", "ABANDONED"]),
+};
+
+type TelemetryPropertyValidator = (value: TelemetryProperty) => boolean;
+
+function enumProperty(
+  ...allowedValues: readonly string[]
+): TelemetryPropertyValidator {
+  const allowed = new Set(allowedValues);
+  return (value) => typeof value === "string" && allowed.has(value);
+}
+
+const nonNegativeNumber: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+const nonNegativeInteger: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const boardDimension: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= 5 &&
+  value <= 100;
+const mineCount: TelemetryPropertyValidator = (value) =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= 1 &&
+  value <= 4_000;
+const booleanProperty: TelemetryPropertyValidator = (value) =>
+  typeof value === "boolean";
+const trainingSessionId: TelemetryPropertyValidator = (value) =>
+  typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(value);
+const PRACTICE_HISTORY_FAILURE_REASONS = new Set([
+  "QUOTA",
+  "SERIALIZATION",
+  "STORAGE",
+  "REPLAY_LIMIT",
+]);
+const practiceHistoryFailureReason: TelemetryPropertyValidator = (value) =>
+  value === null ||
+  (typeof value === "string" &&
+    PRACTICE_HISTORY_FAILURE_REASONS.has(value));
+
+// Practice events intentionally use event-local validators. In particular,
+// trigger/action values have different meanings for a shown hint and an
+// applied coach action, so a shared enum would silently widen both contracts.
+const PRACTICE_PROPERTY_VALIDATORS: Readonly<
+  Partial<
+    Record<
+      TelemetryEventName,
+      Readonly<Record<string, TelemetryPropertyValidator>>
+    >
+  >
+> = {
+  practice_run_started: {
+    trainingSessionId,
+    preset: enumProperty("beginner", "intermediate", "expert", "custom"),
+    generationMode: enumProperty("classic", "no_guess"),
+    width: boardDimension,
+    height: boardDimension,
+    mines: mineCount,
+    assistMode: enumProperty("COACH", "AUTO_MARK_MINES"),
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_hint_shown: {
+    trigger: enumProperty("IDLE", "REQUEST"),
+    status: enumProperty(
+      "READY",
+      "NO_FORCED_MOVE",
+      "PARTIAL",
+      "CONTRADICTION",
+      "ERROR",
+    ),
+    action: enumProperty("REVEAL", "FLAG", "UNFLAG", "NONE"),
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_assist_applied: {
+    trigger: enumProperty("AUTO_MARK", "DEMONSTRATE"),
+    action: enumProperty("REVEAL", "FLAG", "UNFLAG"),
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_run_terminal: {
+    trainingSessionId,
+    preset: enumProperty("beginner", "intermediate", "expert", "custom"),
+    generationMode: enumProperty("classic", "no_guess"),
+    outcome: enumProperty("WON", "LOST"),
+    elapsedMs: nonNegativeNumber,
+    playerActions: nonNegativeInteger,
+    hintsShown: nonNegativeInteger,
+    hintsRequested: nonNegativeInteger,
+    autoFlags: nonNegativeInteger,
+    demonstratedActions: nonNegativeInteger,
+    historySaved: booleanProperty,
+    historyFailureReason: practiceHistoryFailureReason,
+    stageDurationMs: nonNegativeNumber,
+  },
+  practice_no_guess_generation_finished: {
+    preset: enumProperty("beginner", "intermediate", "expert", "custom"),
+    success: booleanProperty,
+    attempts: nonNegativeInteger,
+    elapsedMs: nonNegativeNumber,
+    failureReason: enumProperty(
+      "ATTEMPT_LIMIT",
+      "TIME_LIMIT",
+      "GENERATION_ERROR",
+    ),
+  },
 };
 
 const ALLOWED_PROPERTIES: Readonly<
@@ -1427,6 +1536,42 @@ const ALLOWED_PROPERTIES: Readonly<
     "inputP95Ms",
     "stageDurationMs",
   ]),
+  practice_run_started: new Set([
+    "trainingSessionId",
+    "preset",
+    "generationMode",
+    "width",
+    "height",
+    "mines",
+    "assistMode",
+    "stageDurationMs",
+  ]),
+  practice_hint_shown: new Set([
+    "trigger",
+    "status",
+    "action",
+    "stageDurationMs",
+  ]),
+  practice_assist_applied: new Set([
+    "trigger",
+    "action",
+    "stageDurationMs",
+  ]),
+  practice_run_terminal: new Set([
+    "trainingSessionId",
+    "preset",
+    "generationMode",
+    "outcome",
+    "elapsedMs",
+    "playerActions",
+    "hintsShown",
+    "hintsRequested",
+    "autoFlags",
+    "demonstratedActions",
+    "historySaved",
+    "historyFailureReason",
+    "stageDurationMs",
+  ]),
   solo_history_opened: new Set([
     "scope",
     "recordCount",
@@ -1446,6 +1591,13 @@ const ALLOWED_PROPERTIES: Readonly<
     "elapsedMs",
     "failureReason",
   ]),
+  practice_no_guess_generation_finished: new Set([
+    "preset",
+    "success",
+    "attempts",
+    "elapsedMs",
+    "failureReason",
+  ]),
   duel_invite_created: new Set(["source", "stageDurationMs"]),
   duel_invite_opened: new Set(["source", "stageDurationMs"]),
   duel_joined: new Set(["stageDurationMs"]),
@@ -1459,9 +1611,17 @@ export function sanitizeTelemetryProperties(
   properties: Readonly<Record<string, TelemetryProperty>>,
 ): Readonly<Record<string, TelemetryProperty>> | undefined {
   const allowed = ALLOWED_PROPERTIES[eventName];
+  const practiceValidators = PRACTICE_PROPERTY_VALIDATORS[eventName];
   const sanitized: Record<string, TelemetryProperty> = {};
   for (const [key, value] of Object.entries(properties)) {
     if (!allowed.has(key)) return undefined;
+    const practiceValidator = practiceValidators?.[key];
+    if (
+      practiceValidators &&
+      (!practiceValidator || !practiceValidator(value))
+    ) {
+      return undefined;
+    }
     if (typeof value === "number") {
       if (!Number.isFinite(value)) return undefined;
       sanitized[key] = value;
@@ -1475,8 +1635,9 @@ export function sanitizeTelemetryProperties(
       sanitized[key] = null;
       continue;
     }
+    if (typeof value !== "string") return undefined;
     if (value.length > 64) return undefined;
-    const enumValues = ENUM_PROPERTIES[key];
+    const enumValues = practiceValidator ? undefined : ENUM_PROPERTIES[key];
     if (enumValues && !enumValues.has(value)) return undefined;
     if (
       key === "trainingSessionId" &&

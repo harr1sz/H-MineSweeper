@@ -136,7 +136,12 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
   await page.getByRole("button", { name: "切换到英文" }).click();
   await page.locator(".home-mode-option").nth(2).click();
   await expect(page.getByRole("button", { name: "1v1 temporarily paused" })).toBeVisible();
-  await expect(page.getByText("Solo remains unaffected", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Multiplayer is temporarily unavailable. Solo games and the Academy are still available.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Switch to Chinese" }).click();
 
   await page.getByRole("button", { name: "数据与隐私" }).click();
@@ -224,7 +229,7 @@ test("浏览器存储被阻止时公开单人入口仍可使用", async ({ page 
   });
   await expect(soloEntry).toBeVisible();
   await soloEntry.click();
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await expect(
     page.getByRole("heading", { name: "经典扫雷", exact: true }),
   ).toBeVisible();
@@ -371,7 +376,7 @@ test("组件不卸载时空闲 30 分钟会轮换训练会话，并保持单局 
   await page.getByLabel("自定义宽度").fill("5");
   await page.getByLabel("自定义高度").fill("5");
   await page.getByLabel("自定义雷数").fill("10");
-  await page.getByRole("button", { name: "确认配置 · 进入棋盘" }).click();
+  await page.getByRole("button", { name: "开始对局" }).click();
   await finishSmallCustomRun(page);
   await expect
     .poll(
