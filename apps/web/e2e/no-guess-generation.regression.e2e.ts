@@ -20,7 +20,7 @@ test("ISSUE-002 rapid first-click input starts only one no-guess worker", async 
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await page.getByRole("button", { name: "无猜模式" }).click();
   await page.getByRole("button", { name: "开始对局" }).click();
 

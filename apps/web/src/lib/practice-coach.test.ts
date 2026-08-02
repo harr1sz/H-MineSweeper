@@ -11,10 +11,12 @@ import {
   type VisibleBoardState,
 } from "@h-minesweeper/game-core";
 import {
+  activeAutoFlaggedIndexes,
   coachMineActionForApplicationStep,
   coachMineActionsForApplication,
   coachSuggestionFromAnalysis,
   createCoachRequest,
+  coachMineActionsForAutoMark,
   isCoachActionProven,
   isCoachChordProven,
   isCoachSuggestionApplicable,
@@ -103,6 +105,34 @@ describe("practice coach visible-state boundary", () => {
       mineActions: [],
       safeActions: [],
     });
+  });
+
+  it("carries only still-flagged coach-proven mines across the worker boundary", () => {
+    const state: GameState = {
+      board: {
+        spec: { width: 3, height: 1, mines: 1, seed: "x", startIndex: 1, safeRadius: 0 },
+        mines: Uint8Array.from([1, 0, 0]),
+        adjacent: Uint8Array.from([0, 1, 0]),
+      },
+      visibility: Uint8Array.from([CELL_FLAGGED, CELL_REVEALED, CELL_HIDDEN]),
+      revealedSafeCount: 1,
+      outcome: "PLAYING",
+    };
+    const visible = visibleBoardStateForPractice(state, new Set([0, 2]));
+
+    expect(visible).toEqual({
+      width: 3,
+      height: 1,
+      totalMines: 1,
+      clues: [-1, 1, -1],
+      playerClaims: [0],
+      provenMines: [0],
+    });
+    expect(createCoachRequest(8, visible).visibleState).toEqual(visible);
+    expect(parseCoachRequest({
+      requestId: 8,
+      visibleState: { ...visible, provenMines: [2] },
+    })).toBeNull();
   });
 
   it("rejects malformed worker responses before the UI can show them", () => {
@@ -214,6 +244,33 @@ describe("practice coach deterministic suggestions", () => {
       proof: { rule: "SINGLE_MINE", kind: "MINE" },
     });
     expect(suggestion.mineActions.map(({ cellIndex }) => cellIndex)).toEqual([1, 100, 101]);
+  });
+
+  it("finds immediate safe moves from proven coach flags on a large partial frontier", () => {
+    const width = 100;
+    const height = 100;
+    const clues = Array.from({ length: width * height }, () => -1);
+    clues[1] = 1;
+    for (const column of [10, 20, 30, 40, 50, 60, 70, 80, 90]) {
+      clues[5_000 + column] = 1;
+    }
+    const suggestion = runCoachRequest(createCoachRequest(131, {
+      width,
+      height,
+      totalMines: 999,
+      clues,
+      playerClaims: [0],
+      provenMines: [0],
+    }));
+
+    expect(suggestion).toMatchObject({
+      requestId: 131,
+      status: "PARTIAL",
+      action: "REVEAL",
+      proof: { rule: "SINGLE_SAFE", kind: "SAFE", sources: [1] },
+    });
+    expect(suggestion.safeActions.map(({ cellIndex }) => cellIndex))
+      .toEqual(expect.arrayContaining([2, 100, 101, 102]));
   });
 
   it("still runs GLOBAL analysis on a maximum-size board with a tiny frontier", () => {
@@ -522,7 +579,7 @@ describe("practice coach deterministic suggestions", () => {
     const first = coachMineActionForApplicationStep(suggestion, initial, initial, 0);
     expect(first).toMatchObject({ cellIndex: 1, proof: { stateHash: suggestion.stateHash } });
 
-    const afterFirst = { ...initial, playerClaims: [1] };
+    const afterFirst = { ...initial, playerClaims: [1], provenMines: [1] };
     const second = coachMineActionForApplicationStep(suggestion, initial, afterFirst, 1);
     expect(second).toMatchObject({
       cellIndex: 2,
@@ -530,13 +587,17 @@ describe("practice coach deterministic suggestions", () => {
     });
     expect(analyzeVisibleBoard(afterFirst).proofs).toContainEqual(second?.proof);
 
-    const afterSecond = { ...initial, playerClaims: [1, 2] };
+    const afterSecond = {
+      ...initial,
+      playerClaims: [1, 2],
+      provenMines: [1, 2],
+    };
     expect(coachMineActionForApplicationStep(suggestion, initial, afterSecond, 2))
       .toMatchObject({ cellIndex: 3 });
     expect(coachMineActionForApplicationStep(
       suggestion,
       initial,
-      { ...initial, playerClaims: [3] },
+      { ...initial, playerClaims: [3], provenMines: [3] },
       1,
     )).toBeNull();
     expect(coachMineActionForApplicationStep(
@@ -570,6 +631,97 @@ describe("practice coach deterministic suggestions", () => {
     expect(suggestion.mineActions.map(({ cellIndex }) => cellIndex)).toEqual([2]);
     expect(coachMineActionsForApplication(suggestion, visibleState)
       .map(({ cellIndex }) => cellIndex)).toEqual([2]);
+  });
+
+  it("keeps GLOBAL and CSP mine proofs as guidance but excludes them from automatic marking", () => {
+    const visibleState: VisibleBoardState = {
+      width: 4,
+      height: 1,
+      totalMines: 4,
+      clues: [-1, -1, -1, -1],
+      playerClaims: [],
+    };
+    const stateHash = hashVisibleBoardState(visibleState);
+    const suggestion = coachSuggestionFromAnalysis(
+      createCoachRequest(27, visibleState),
+      analysis(visibleState, [
+        proof(stateHash, "SINGLE_MINE", "MINE", [0]),
+        proof(stateHash, "SUBSET_MINE", "MINE", [1]),
+        proof(stateHash, "GLOBAL_MINE", "MINE", [2]),
+        proof(stateHash, "CSP_MINE", "MINE", [3]),
+      ]),
+    );
+
+    expect(suggestion.mineActions.map(({ cellIndex }) => cellIndex)).toEqual([0, 1, 2, 3]);
+    expect(coachMineActionsForAutoMark(suggestion, visibleState)
+      .map(({ cellIndex }) => cellIndex)).toEqual([0]);
+    expect(isCoachActionProven(suggestion, visibleState, "FLAG", 3)).toBe(true);
+  });
+
+  it("automatically marks every single-clue conclusion but leaves subset deductions as hints", () => {
+    const visibleState: VisibleBoardState = {
+      width: 5,
+      height: 1,
+      totalMines: 4,
+      clues: [-1, -1, -1, -1, -1],
+      playerClaims: [],
+    };
+    const stateHash = hashVisibleBoardState(visibleState);
+    const firstGroup = proof(stateHash, "SINGLE_MINE", "MINE", [0, 1, 2], [4]);
+    const suggestion = coachSuggestionFromAnalysis(
+      createCoachRequest(28, visibleState),
+      analysis(visibleState, [
+        firstGroup,
+        proof(stateHash, "SUBSET_MINE", "MINE", [3], [4]),
+      ]),
+    );
+
+    expect(coachMineActionsForAutoMark(suggestion, visibleState)
+      .map(({ cellIndex }) => cellIndex)).toEqual([0, 1, 2]);
+  });
+
+  it("waits for an intermediate reveal before auto-marking a former subset conclusion", () => {
+    const beforeReveal: VisibleBoardState = {
+      width: 3,
+      height: 2,
+      totalMines: 1,
+      clues: [1, 2, -1, -1, -1, -1],
+      playerClaims: [],
+    };
+    const beforeHash = hashVisibleBoardState(beforeReveal);
+    const subsetSuggestion = coachSuggestionFromAnalysis(
+      createCoachRequest(29, beforeReveal),
+      analysis(beforeReveal, [
+        proof(beforeHash, "SUBSET_MINE", "MINE", [2], [0, 1]),
+      ]),
+    );
+    expect(coachMineActionsForAutoMark(subsetSuggestion, beforeReveal)).toEqual([]);
+
+    const afterReveal: VisibleBoardState = {
+      ...beforeReveal,
+      clues: [1, 2, -1, -1, 2, -1],
+    };
+    const afterHash = hashVisibleBoardState(afterReveal);
+    const singleSuggestion = coachSuggestionFromAnalysis(
+      createCoachRequest(30, afterReveal),
+      analysis(afterReveal, [
+        proof(afterHash, "SINGLE_MINE", "MINE", [2], [4]),
+      ]),
+    );
+    expect(coachMineActionsForAutoMark(singleSuggestion, afterReveal)
+      .map(({ cellIndex }) => cellIndex)).toEqual([2]);
+  });
+
+  it("does not expose stale auto-mark dots after their flags are removed", () => {
+    expect(activeAutoFlaggedIndexes(
+      new Set([3, 1, 2, 99]),
+      Uint8Array.from([
+        CELL_HIDDEN,
+        CELL_FLAGGED,
+        CELL_HIDDEN,
+        CELL_FLAGGED,
+      ]),
+    )).toEqual([1, 3]);
   });
 
   it("proves a chord only when every unflagged covered neighbor has a safe reveal proof", () => {

@@ -1384,13 +1384,6 @@ export function App() {
                     >
                       {t("home.solo.enter")}
                     </button>
-                    <button
-                      className="secondary-button entry-practice-button"
-                      type="button"
-                      onClick={() => enterSolo("no_guess", "GUIDED_PRACTICE")}
-                    >
-                      {t("home.solo.practice")}
-                    </button>
                     <p className="entry-mode-note">
                       {t("home.solo.note")}
                     </p>

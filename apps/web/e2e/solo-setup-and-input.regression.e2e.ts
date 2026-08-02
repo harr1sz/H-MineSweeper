@@ -38,7 +38,7 @@ async function openSoloSetup(page: Page): Promise<void> {
     { fixedNow: FIXED_NOW, fixedRandomWord: FIXED_RANDOM_WORD },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await expect(
     page.getByRole("heading", { name: "配置单人对局" }),
   ).toBeVisible();

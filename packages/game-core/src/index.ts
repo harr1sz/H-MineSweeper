@@ -1344,6 +1344,8 @@ export interface VisibleBoardState {
   readonly clues: readonly number[];
   /** Player flags are claims only and never become solver facts. */
   readonly playerClaims: readonly number[];
+  /** Mines previously proved from visible clues; must also remain flagged. */
+  readonly provenMines?: readonly number[];
 }
 
 export type VisibleAnalysisStatus = "COMPLETE" | "PARTIAL" | "CONTRADICTION";
@@ -1365,7 +1367,10 @@ export interface VisibleBoardAnalysis {
 
 export function hashVisibleBoardState(state: VisibleBoardState): string {
   const claims = [...new Set(state.playerClaims)].sort((a, b) => a - b);
-  const input = `${state.width}x${state.height}:${state.totalMines}:${state.clues.join(",")}:${claims.join(",")}`;
+  const provenMines = [...new Set(state.provenMines ?? [])].sort((a, b) => a - b);
+  const input = `${state.width}x${state.height}:${state.totalMines}:${state.clues.join(",")}:${claims.join(",")}${
+    provenMines.length > 0 ? `:proven=${provenMines.join(",")}` : ""
+  }`;
   let hash = 0x811c9dc5;
   for (let index = 0; index < input.length; index += 1) {
     hash ^= input.charCodeAt(index);
@@ -1381,17 +1386,21 @@ function collectVisibleConstraints(state: VisibleBoardState): Constraint[] | nul
     state.clues.length !== state.width * state.height ||
     !Number.isSafeInteger(state.totalMines) || state.totalMines < 0
   ) return null;
+  const provenMines = new Set(state.provenMines ?? []);
   const constraints: Constraint[] = [];
   for (let source = 0; source < state.clues.length; source += 1) {
     const clue = state.clues[source];
     if (clue === undefined || clue < 0) continue;
     if (!Number.isSafeInteger(clue) || clue > 8) return null;
-    const cells = getNeighborIndices(state.width, state.height, source)
-      .filter((index) => (state.clues[index] ?? -1) < 0)
+    const neighbors = getNeighborIndices(state.width, state.height, source);
+    const adjacentProvenMines = neighbors.filter((index) => provenMines.has(index)).length;
+    const cells = neighbors
+      .filter((index) => (state.clues[index] ?? -1) < 0 && !provenMines.has(index))
       .sort((a, b) => a - b);
-    if (clue > cells.length) return null;
-    if (cells.length > 0) constraints.push({ source, cells, remainingMines: clue });
-    else if (clue !== 0) return null;
+    const remainingMines = clue - adjacentProvenMines;
+    if (remainingMines < 0 || remainingMines > cells.length) return null;
+    if (cells.length > 0) constraints.push({ source, cells, remainingMines });
+    else if (remainingMines !== 0) return null;
   }
   return constraints;
 }
@@ -1405,34 +1414,53 @@ export function analyzeVisibleBoard(
   nodeBudget = 100_000,
 ): VisibleBoardAnalysis {
   const stateHash = hashVisibleBoardState(state);
+  const claims = [...new Set(state.playerClaims)];
+  const claimSet = new Set(claims);
+  const provenMines = [...new Set(state.provenMines ?? [])];
+  const provenMineSet = new Set(provenMines);
+  const provenMinesAreValid = provenMines.every((index) =>
+    Number.isSafeInteger(index) &&
+    index >= 0 &&
+    index < state.clues.length &&
+    state.clues[index] === -1 &&
+    claimSet.has(index)
+  );
   const constraints = collectVisibleConstraints(state);
-  if (!constraints || !Number.isSafeInteger(nodeBudget) || nodeBudget < 1) {
+  if (
+    !constraints ||
+    !provenMinesAreValid ||
+    !Number.isSafeInteger(nodeBudget) ||
+    nodeBudget < 1
+  ) {
     return { status: "CONTRADICTION", proofs: [], searchedNodes: 0, stateHash };
   }
   const local = collectDeductions(constraints);
-  const hidden = state.clues.flatMap((clue, index) => clue < 0 ? [index] : []);
+  const hidden = state.clues.flatMap((clue, index) =>
+    clue < 0 && !provenMineSet.has(index) ? [index] : []
+  );
   const hiddenSet = new Set(hidden);
-  const claims = [...new Set(state.playerClaims)];
-  const claimSet = new Set(claims);
+  const unprovenClaims = claims.filter((index) => !provenMineSet.has(index));
+  const unprovenClaimSet = new Set(unprovenClaims);
+  const remainingTotalMines = state.totalMines - provenMines.length;
   const proofs: VisibleBoardProof[] = local.map((proof) => ({ ...proof, stateHash }));
   let claimContradictionProven =
-    claims.some((index) => !Number.isSafeInteger(index) || !hiddenSet.has(index)) ||
+    unprovenClaims.some((index) => !Number.isSafeInteger(index) || !hiddenSet.has(index)) ||
     claims.length > state.totalMines ||
     constraints.some((constraint) =>
-      constraint.cells.filter((cell) => claimSet.has(cell)).length >
+      constraint.cells.filter((cell) => unprovenClaimSet.has(cell)).length >
         constraint.remainingMines
     ) ||
     local.some((proof) =>
-      proof.kind === "SAFE" && proof.targets.some((target) => claimSet.has(target))
+      proof.kind === "SAFE" && proof.targets.some((target) => unprovenClaimSet.has(target))
     );
-  if (state.totalMines > hidden.length) {
+  if (remainingTotalMines < 0 || remainingTotalMines > hidden.length) {
     return { status: "CONTRADICTION", proofs, searchedNodes: 0, stateHash };
   }
-  if (state.totalMines === 0 || state.totalMines === hidden.length) {
+  if (remainingTotalMines === 0 || remainingTotalMines === hidden.length) {
     proofs.push({
-      rule: state.totalMines === 0 ? "GLOBAL_SAFE" : "GLOBAL_MINE",
+      rule: remainingTotalMines === 0 ? "GLOBAL_SAFE" : "GLOBAL_MINE",
       sources: [], targets: hidden,
-      kind: state.totalMines === 0 ? "SAFE" : "MINE", stateHash,
+      kind: remainingTotalMines === 0 ? "SAFE" : "MINE", stateHash,
     });
     return {
       status: claimContradictionProven ? "CONTRADICTION" : "COMPLETE",
@@ -1449,8 +1477,8 @@ export function analyzeVisibleBoard(
   const unconstrained = hidden.filter((cell) => !frontierSet.has(cell));
   const unconstrainedCount = unconstrained.length;
   const unconstrainedSet = new Set(unconstrained);
-  const unconstrainedClaimCount = claims.filter((cell) => unconstrainedSet.has(cell)).length;
-  const frontierClaimPositions = claims.flatMap((cell) => {
+  const unconstrainedClaimCount = unprovenClaims.filter((cell) => unconstrainedSet.has(cell)).length;
+  const frontierClaimPositions = unprovenClaims.flatMap((cell) => {
     const position = frontierPosition.get(cell);
     return position === undefined ? [] : [position];
   });
@@ -1477,9 +1505,12 @@ export function analyzeVisibleBoard(
       if (mines > constraint.remainingMines || mines + unknown < constraint.remainingMines) return;
     }
     if (position === frontier.length) {
-      if (assignedMines > state.totalMines || assignedMines + unconstrainedCount < state.totalMines) return;
+      if (
+        assignedMines > remainingTotalMines ||
+        assignedMines + unconstrainedCount < remainingTotalMines
+      ) return;
       solutions += 1;
-      const unconstrainedMines = state.totalMines - assignedMines;
+      const unconstrainedMines = remainingTotalMines - assignedMines;
       unconstrainedMineCounts.add(unconstrainedMines);
       if (
         frontierClaimPositions.every((claimPosition) => values[claimPosition] === 1) &&

@@ -113,12 +113,16 @@ export function ReplayBoard({ width, height, state }: {
     state.wrongFlags.size === 0 ? "" : t("replay.a11y.wrongFlags", { coordinates: [...state.wrongFlags].map(coordinate).join("; ") }),
     state.detonatedMine === undefined ? "" : t("replay.a11y.detonated", { coordinate: coordinate(state.detonatedMine) }),
   ].filter(Boolean).join(" ");
+  const revealedCellCount = Array.from(state.cells).filter((value) => value >= 0).length;
+  const terminalMineCount = state.otherMines.size + (state.detonatedMine === undefined ? 0 : 1);
   return <div className="replay-board-scroll">
     <canvas
       ref={canvasRef}
       role="img"
       aria-label={t("replay.boardAria", { width, height })}
       aria-describedby="replay-board-description"
+      data-revealed-cell-count={revealedCellCount}
+      data-terminal-mine-count={terminalMineCount}
     />
     <p className="sr-only" id="replay-board-description">{accessibleParts}</p>
   </div>;

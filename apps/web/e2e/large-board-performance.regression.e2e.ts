@@ -8,7 +8,7 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   // Report: .gstack/qa-reports/qa-report-desktop-2026-07-31.md
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await page
     .locator(".solo-tabs")
     .getByRole("button", { name: /^自定义 5–100/ })

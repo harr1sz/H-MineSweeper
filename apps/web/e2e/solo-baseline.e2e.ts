@@ -13,9 +13,9 @@ const FIXED_SEED = `solo-v1-${FIXED_NOW.toString(36)}-${Array.from(
 async function enterSoloSetup(page: Page): Promise<void> {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "单人游戏 · 配置开局" }),
+    page.getByRole("button", { name: "开始单人游戏" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "单人游戏 · 配置开局" }).click();
+  await page.getByRole("button", { name: "开始单人游戏" }).click();
   await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
 }
 

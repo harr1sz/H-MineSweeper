@@ -2,6 +2,35 @@ export const SOLO_COMBO_WINDOW_MS = 3_000;
 
 export type SoloComboTier = 0 | 2 | 4 | 8 | 12;
 
+export type SoloComboFeedbackKey =
+  | "solo.combo.start"
+  | "solo.combo.rhythm"
+  | "solo.combo.clean"
+  | "solo.combo.flow"
+  | "solo.combo.sharp"
+  | "solo.combo.rolling"
+  | "solo.combo.strong"
+  | "solo.combo.flying"
+  | "solo.combo.high.1"
+  | "solo.combo.high.2"
+  | "solo.combo.high.3"
+  | "solo.combo.high.4"
+  | "solo.combo.high.5"
+  | "solo.combo.high.6"
+  | "solo.combo.high.7"
+  | "solo.combo.high.8";
+
+const HIGH_STREAK_FEEDBACK: readonly SoloComboFeedbackKey[] = [
+  "solo.combo.high.1",
+  "solo.combo.high.2",
+  "solo.combo.high.3",
+  "solo.combo.high.4",
+  "solo.combo.high.5",
+  "solo.combo.high.6",
+  "solo.combo.high.7",
+  "solo.combo.high.8",
+];
+
 export interface SoloComboState {
   readonly count: number;
   readonly lastIncrementAtMs: number | null;
@@ -44,6 +73,20 @@ export function getSoloComboTier(count: number): SoloComboTier {
   if (count >= 4) return 4;
   if (count >= 2) return 2;
   return 0;
+}
+
+export function getSoloComboFeedbackKey(count: number): SoloComboFeedbackKey {
+  if (count >= 12) {
+    return HIGH_STREAK_FEEDBACK[(count - 12) % HIGH_STREAK_FEEDBACK.length]!;
+  }
+  if (count >= 11) return "solo.combo.flying";
+  if (count >= 10) return "solo.combo.strong";
+  if (count >= 9) return "solo.combo.rolling";
+  if (count >= 8) return "solo.combo.sharp";
+  if (count >= 7) return "solo.combo.flow";
+  if (count >= 6) return "solo.combo.clean";
+  if (count >= 4) return "solo.combo.rhythm";
+  return "solo.combo.start";
 }
 
 export function getSoloComboDeadlineMs(
@@ -91,9 +134,10 @@ export function reduceSoloCombo(
     return state;
   }
 
-  if (!event.accepted || event.hitMine || event.safeCellsRevealed < 1) {
+  if (event.hitMine) {
     return createSoloComboState();
   }
+  if (!event.accepted || event.safeCellsRevealed < 1) return state;
 
   const continues =
     state.lastIncrementAtMs !== null &&

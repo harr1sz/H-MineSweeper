@@ -462,7 +462,10 @@ export function validatePracticeRunRecordV1(
   return issues;
 }
 
-function visibleState(state: GameState): VisibleBoardState {
+function visibleState(
+  state: GameState,
+  provenMines: ReadonlySet<number> = new Set(),
+): VisibleBoardState {
   const clues = Array.from(state.visibility, (visibility, index) =>
     visibility === CELL_REVEALED ? (state.board.adjacent[index] ?? 0) : -1,
   );
@@ -475,6 +478,13 @@ function visibleState(state: GameState): VisibleBoardState {
     totalMines: state.board.spec.mines,
     clues,
     playerClaims,
+    ...([...provenMines].some((index) => playerClaims.includes(index))
+      ? {
+          provenMines: [...provenMines]
+            .filter((index) => playerClaims.includes(index))
+            .sort((left, right) => left - right),
+        }
+      : {}),
   };
 }
 
@@ -555,10 +565,19 @@ function validatePracticePair(
   return issues;
 }
 
-function verifyProof(state: GameState, proof: VisibleBoardProof): void {
-  const visible = visibleState(state);
-  const currentHash = hashVisibleBoardState(visible);
-  if (proof.stateHash !== currentHash) {
+function verifyProof(
+  state: GameState,
+  proof: VisibleBoardProof,
+  provenMines: ReadonlySet<number>,
+): void {
+  const currentVisible = visibleState(state, provenMines);
+  const legacyVisible = visibleState(state);
+  const visible = proof.stateHash === hashVisibleBoardState(currentVisible)
+    ? currentVisible
+    : proof.stateHash === hashVisibleBoardState(legacyVisible)
+      ? legacyVisible
+      : null;
+  if (!visible) {
     throw new PracticeHistoryValidationError(["Coach proof uses a stale visible state hash"]);
   }
   const analysis = analyzeVisibleBoard(visible);
@@ -591,6 +610,7 @@ export function verifyPracticeReplay(
   const pairIssues = validatePracticePair(record, replay);
   if (pairIssues.length > 0) throw new PracticeHistoryValidationError(pairIssues);
   const state = createGameState(createBoard(record.board.spec));
+  const provenMines = new Set<number>();
   for (const index of replay.initialFlags) {
     const delta = toggleFlag(state, index);
     if (!delta.accepted) throw new PracticeHistoryValidationError(["Practice replay has an invalid initial flag"]);
@@ -601,9 +621,14 @@ export function verifyPracticeReplay(
       throw new PracticeHistoryValidationError(["Practice replay contains an event after the game ended"]);
     }
     if (event.eventType === "ASSISTANCE_SHOWN") {
-      const currentVisible = visibleState(state);
-      const currentHash = hashVisibleBoardState(currentVisible);
-      if (event.visibleStateHash !== currentHash || event.suggestion.stateHash !== currentHash) {
+      const provenVisible = visibleState(state, provenMines);
+      const legacyVisible = visibleState(state);
+      const currentVisible = event.visibleStateHash === hashVisibleBoardState(provenVisible)
+        ? provenVisible
+        : event.visibleStateHash === hashVisibleBoardState(legacyVisible)
+          ? legacyVisible
+          : null;
+      if (!currentVisible || event.suggestion.stateHash !== event.visibleStateHash) {
         throw new PracticeHistoryValidationError([`Assistance event ${event.seq} uses a stale state`]);
       }
       const expectedSuggestion = runCoachRequest(
@@ -618,7 +643,7 @@ export function verifyPracticeReplay(
       throw new PracticeHistoryValidationError([`Event ${event.seq} pre-state hash does not match`]);
     }
     if (event.eventType === "COACH_ACTION") {
-      verifyProof(state, event.proof);
+      verifyProof(state, event.proof, provenMines);
       if (
         !event.proof.targets.includes(event.cellIndex) ||
         (event.proof.kind === "MINE" && event.action !== "FLAG") ||
@@ -641,6 +666,15 @@ export function verifyPracticeReplay(
     }
     if (delta.stateHash !== event.postStateHash) {
       throw new PracticeHistoryValidationError([`Event ${event.seq} post-state hash does not match`]);
+    }
+    if (event.eventType === "COACH_ACTION") {
+      if (event.action === "FLAG") provenMines.add(event.cellIndex);
+      else if (event.action === "UNFLAG") provenMines.delete(event.cellIndex);
+    } else if (
+      event.actionType === "TOGGLE_FLAG" &&
+      state.visibility[event.cellIndex] !== CELL_FLAGGED
+    ) {
+      provenMines.delete(event.cellIndex);
     }
     if (state.outcome !== "PLAYING" && eventIndex !== replay.events.length - 1) {
       throw new PracticeHistoryValidationError(["The terminal action must be the final replay event"]);

@@ -8,6 +8,7 @@ import {
   type PracticeRunRecordV1,
 } from "../lib/practice-history";
 import type { PracticeReplayWorkerResponse } from "../workers/practiceReplayWorker";
+import { buildPracticeReplayBoardCells } from "../lib/practice-replay-board";
 import { ReplayBoard, type ReplayBoardCellState } from "./ReplayBoard";
 import "./replay-review.css";
 import "./practice-replay.css";
@@ -104,27 +105,21 @@ export function PracticeReplayReview({ recordId, onExit }: PracticeReplayReviewP
   const selectedStep = result?.steps[selectedIndex];
   const selectedProof = proofForEvent(selectedEvent, selectedStep?.before.proofs ?? []);
 
-  const cellsBefore = useMemo(() => {
+  const replayCells = useMemo(() => {
     if (!record || !replay || !result) return null;
-    const cells = new Int8Array(record.board.spec.width * record.board.spec.height);
-    cells.fill(-2);
-    for (const index of replay.initialFlags) cells[index] = -3;
-    for (let index = 0; index < selectedIndex; index += 1) {
-      const step = result.steps[index];
-      if (!step) continue;
-      for (const cell of step.revealed) cells[cell.index] = cell.value;
-      if (step.flagChange) cells[step.flagChange.index] = step.flagChange.flagged ? -3 : -2;
-    }
-    return cells;
-  }, [record, replay, result, selectedIndex]);
+    return buildPracticeReplayBoardCells({
+      cellCount: record.board.spec.width * record.board.spec.height,
+      initialFlags: replay.initialFlags,
+      steps: result.steps,
+      selectedIndex,
+      showAfter,
+      showTerminalTruth,
+      terminalCells: result.terminal.cells,
+    });
+  }, [record, replay, result, selectedIndex, showAfter, showTerminalTruth]);
 
   const boardState = useMemo<ReplayBoardCellState | null>(() => {
-    if (!record || !result || !cellsBefore || !selectedEvent) return null;
-    const cells = Int8Array.from(cellsBefore);
-    if (showAfter && selectedStep) {
-      for (const cell of selectedStep.revealed) cells[cell.index] = cell.value;
-      if (selectedStep.flagChange) cells[selectedStep.flagChange.index] = selectedStep.flagChange.flagged ? -3 : -2;
-    }
+    if (!record || !result || !replayCells || !selectedEvent) return null;
     const target = selectedEvent.eventType === "ASSISTANCE_SHOWN"
       ? selectedEvent.suggestion.cellIndex
       : selectedEvent.cellIndex;
@@ -134,7 +129,7 @@ export function PracticeReplayReview({ recordId, onExit }: PracticeReplayReviewP
         ? selectedEvent.action
         : undefined;
     return {
-      cells,
+      cells: replayCells,
       proofSources: new Set(selectedProof?.sources ?? []),
       suggestedSafe: new Set(
         target !== undefined && (suggestionAction === "REVEAL" || suggestionAction === "UNFLAG")
@@ -151,7 +146,7 @@ export function PracticeReplayReview({ recordId, onExit }: PracticeReplayReviewP
       correctFlags: new Set(showTerminalTruth ? result.terminal.correctFlags : []),
       wrongFlags: new Set(showTerminalTruth ? result.terminal.wrongFlags : []),
     };
-  }, [cellsBefore, record, result, selectedEvent, selectedProof, selectedStep, showAfter, showTerminalTruth]);
+  }, [record, replayCells, result, selectedEvent, selectedProof, showTerminalTruth]);
 
   const coordinate = (cellIndex: number) => {
     const width = record?.board.spec.width ?? 1;
