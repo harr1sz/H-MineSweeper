@@ -135,11 +135,11 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
     page.getByRole("button", { name: "开始单人游戏" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "切换到英文" }).click();
-  await page.locator(".home-mode-option").nth(2).click();
+  await page.locator(".home-mode-option").nth(1).click();
   await expect(page.getByRole("button", { name: "1v1 temporarily paused" })).toBeVisible();
   await expect(
     page.getByText(
-      "Multiplayer is temporarily unavailable. Solo games and the Academy are still available.",
+      "Multiplayer is temporarily unavailable. Solo games and guided practice are still available.",
       { exact: true },
     ),
   ).toBeVisible();

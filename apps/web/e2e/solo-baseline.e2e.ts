@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createBoard } from "@h-minesweeper/game-core";
-import { scenariosForConcept } from "../src/lib/academy-scenarios";
-import type { LearningConceptId } from "../src/lib/learning-contracts";
 
 const FIXED_NOW = Date.UTC(2026, 6, 30, 8);
 const FIXED_RANDOM_WORD = 0x12345678;
@@ -74,36 +72,14 @@ async function clickBoardCell(
   });
 }
 
-async function answerAcademyScenario(page: Page, conceptId: LearningConceptId, stageIndex: number): Promise<void> {
-  const scenario = scenariosForConcept(conceptId)[stageIndex];
-  if (!scenario) throw new Error(`${conceptId} 缺少第 ${stageIndex + 1} 个场景`);
-  const groups = [
-    { action: "REVEAL", button: "◇ 判安全" },
-    { action: "FLAG", button: "◆ 标雷" },
-    { action: "UNDETERMINED", button: "? 当前无法确定" },
-  ] as const;
-  for (const group of groups) {
-    const actions = scenario.expectedActions.filter(({ action }) => action === group.action);
-    if (actions.length === 0) continue;
-    await page.getByRole("button", { name: group.button }).click();
-    for (const action of actions) {
-      const row = Math.floor(action.cellIndex / scenario.board.width) + 1;
-      const column = (action.cellIndex % scenario.board.width) + 1;
-      await page.getByRole("button", { name: new RegExp(`未知格 ${row}行${column}列`) }).click();
-    }
-  }
-  await page.getByRole("button", { name: "检查判断" }).click();
-  await expect(page.getByText("推理已验证")).toBeVisible();
-}
-
 test("语言切换采用浏览器语言并保留当前模式状态", async ({ page }) => {
   await page.goto("/");
-  const academy = page.locator(".home-mode-option").nth(1);
-  await academy.click();
-  await expect(academy).toHaveAttribute("aria-pressed", "true");
+  const duel = page.locator(".home-mode-option").nth(1);
+  await duel.click();
+  await expect(duel).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "切换到英文" }).click();
-  const academyEnglish = page.locator(".home-mode-option").nth(1);
-  await expect(academyEnglish).toHaveAttribute("aria-pressed", "true");
+  const duelEnglish = page.locator(".home-mode-option").nth(1);
+  await expect(duelEnglish).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("heading", { name: "Choose a mode" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => ({
     title: document.title,
@@ -112,7 +88,7 @@ test("语言切换采用浏览器语言并保留当前模式状态", async ({ pa
     twitter: document.querySelector('meta[name="twitter:description"]')?.getAttribute("content"),
   }))).toEqual({
     title: "H‑MineSweeper · Solo Training Alpha",
-    description: "H‑MineSweeper offers solo practice with local history, replay analysis, and the Minesweeper Academy.",
+    description: "H‑MineSweeper offers solo practice with local history, replay analysis, and guided practice.",
     openGraph: "Solo Minesweeper training with local history, verified replays, and guided practice.",
     twitter: "Solo Minesweeper training with local history, verified replays, and guided practice.",
   });
@@ -148,176 +124,6 @@ test("进行中的棋盘切换语言不会重置局面", async ({ page }) => {
   await expect.poll(() => page.locator(".solo-shell").innerText()).not.toMatch(/[\u3400-\u9fff]/u);
 });
 
-test("学院和 1v1 开启态使用同一英文 catalog", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "切换到英文" }).click();
-  await page.locator(".home-mode-option").nth(2).click();
-  await expect(page.getByRole("button", { name: "Create 1v1 room" })).toBeVisible();
-  await expect(page.getByText(/If the 1v1 service is unavailable, Solo and the Academy remain available/)).toBeVisible();
-  await page.locator(".home-mode-option").nth(1).click();
-  await page.getByRole("button", { name: "Start the first Academy lesson" }).click();
-  await expect(page.getByRole("heading", { name: "Minesweeper Academy" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Learn the basic controls" })).toBeVisible();
-  await expect.poll(() => page.locator(".academy-shell").innerText()).not.toMatch(/[\u3400-\u9fff]/u);
-});
-
-test("学院使用 3×3 操作预热、单旗杆和理由优先的真实棋盘", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/");
-  await page.locator(".home-mode-option").nth(1).click();
-  await page.getByRole("button", { name: "扫雷学院 · 开始第一课" }).click();
-
-  await expect(page.locator(".primer-grid .primer-cell")).toHaveCount(9);
-  await page.locator(".primer-grid button").click();
-  await page.getByRole("button", { name: "下一步" }).click();
-  await expect(page.locator(".primer-grid .primer-cell")).toHaveCount(9);
-  await expect(page.locator(".primer-grid .primer-cell.is-revealed")).toHaveCount(8);
-  await expect(page.locator(".primer-grid .primer-cell.is-revealed")).toHaveText(["1", "1", "1", "1", "1", "1", "1", "1"]);
-  await page.getByRole("button", { name: "练习插旗：右键、长按或按 F" }).press("f");
-  await expect(page.locator(".academy-flag-pole")).toHaveCount(1);
-  await page.getByRole("button", { name: "下一步" }).click();
-  await page.getByRole("button", { name: "可以直接揭开的安全格" }).click();
-  await page.getByRole("button", { name: "下一步" }).click();
-  await page.getByRole("button", { name: "根据数字可以确定安全的盖住格" }).click();
-  await expect(page.getByText(/空白格.*安全/)).toBeVisible();
-  await page.getByRole("button", { name: "根据数字可以确定是雷的盖住格" }).press("f");
-  await page.getByRole("button", { name: "下一步" }).click();
-  await page.getByRole("button", {
-    name: "数字 1，点击后同时打开周围其余未标记的格",
-  }).click();
-  await page.getByRole("button", { name: "进入第一道逻辑题" }).click();
-
-  await expect(page.locator(".academy-mini-board .academy-cell")).toHaveCount(16);
-  await expect(page.locator(".academy-mini-board .cell-number")).toHaveText(["1"]);
-  await page.getByRole("button", { name: "◆ 标雷" }).click();
-  await page.getByRole("button", { name: /未知格 2行1列/ }).click();
-  await page.getByRole("button", { name: "◇ 判安全" }).click();
-  await page.getByRole("button", { name: /未知格 2行3列/ }).click();
-  await page.getByRole("button", { name: "检查判断" }).click();
-  await expect(page.getByText("推理已验证")).toBeVisible();
-  await expect(page.locator(".academy-mini-board .is-explanation-source")).toHaveCount(1);
-  await expect(page.locator(".academy-lesson")).not.toContainText(/PROOF|STATE|[A-D]\+/);
-  await page.getByRole("button", { name: "下一题" }).click();
-  await expect(page.getByRole("heading", { name: "数字与八邻域" })).toBeVisible();
-  await expect(page.locator(".academy-mini-board .cell-unknown")).toHaveCount(3);
-  await expectNoPageHorizontalOverflow(page);
-  await page.getByRole("button", { name: "切换到英文" }).click();
-  await expect(page.getByRole("heading", { name: "Clues and eight neighbors" })).toBeVisible();
-  await expect.poll(() => page.locator(".academy-shell").innerText()).not.toMatch(/[\u3400-\u9fff]/u);
-});
-
-test("学院连锁推理使用真实 1-1-2 局面并让未完成答案得到可操作反馈", async ({ page }) => {
-  await page.goto("/#/academy/practice/PRACTICE_CHAINED_FRONTS");
-  await expect(page.getByRole("heading", { name: "一步接一步的推理" })).toBeVisible();
-  await expect(page.locator(".academy-mini-board .cell-number")).toHaveText(["1", "1", "2"]);
-  await expect(page.locator(".academy-mini-board .cell-open").filter({ hasText: /[12]/ }).first()).toBeVisible();
-  const check = page.getByRole("button", { name: "检查判断" });
-  await expect(check).toBeEnabled();
-  await check.click();
-  await expect(page.getByText("先选择要判断的盖住格。")).toBeVisible();
-  await expect(page.locator(".academy-lesson")).not.toContainText(/和弦|多个前沿|\bproof\b/i);
-});
-
-test("第一张无猜棋盘要求连续完成同一张 5×5 棋盘", async ({ page }) => {
-  await page.goto("/#/academy/practice/FOUNDATIONS_FIRST_BOARD");
-  await expect(page.getByRole("heading", { name: "第一张无猜棋盘" })).toBeVisible();
-  for (const [stageIndex, seedNumber] of [2, 3, 4, 6, 7].entries()) {
-    const cells = page.locator(".academy-first-board button");
-    await expect(cells).toHaveCount(25);
-    await cells.nth(12).click();
-    if (stageIndex === 0) {
-      const revealedAfterFirstClick = await page.locator(".academy-first-board .cell-open").count();
-      await page.getByRole("button", { name: "切换到英文" }).click();
-      await expect(page.getByRole("heading", { name: "First no-guess board" })).toBeVisible();
-      await expect(page.locator(".academy-first-board .cell-open")).toHaveCount(revealedAfterFirstClick);
-      await page.getByRole("button", { name: "Switch to Chinese" }).click();
-    }
-    const generated = createBoard({ width: 5, height: 5, mines: 4, seed: `academy-first-${seedNumber}`, startIndex: 12, safeRadius: 1 });
-    for (let index = 0; index < 25; index += 1) {
-      if (generated.mines[index] === 1) continue;
-      const label = await cells.nth(index).getAttribute("aria-label");
-      if (label?.includes("未揭开")) await cells.nth(index).click();
-    }
-    await expect(page.getByText(/完成了整张无猜棋盘/)).toBeVisible();
-    if (stageIndex < 4) await page.getByRole("button", { name: "下一题" }).click();
-  }
-  await expect(page.getByText("未见迁移题")).toBeVisible();
-});
-
-test("安全快速展开允许直接揭格，并解释错旗造成的触雷", async ({ page }) => {
-  await page.goto("/#/academy/practice/PRACTICE_SAFE_CHORD");
-  await expect(page.getByRole("heading", { name: "安全快速展开与错旗后果" })).toBeVisible();
-  const cells = page.locator(".academy-first-board button");
-  await expect(cells).toHaveCount(25);
-
-  await cells.nth(1).click();
-  await expect(page.getByText(/直接揭开了能确定安全的格/)).toBeVisible();
-
-  await page.reload();
-  const retryCells = page.locator(".academy-first-board button");
-  await retryCells.nth(1).press("f");
-  await retryCells.nth(0).click();
-  await expect(page.getByText(/旗插在安全格上.*真正的雷/)).toBeVisible();
-  await page.getByRole("button", { name: "重试这个局面" }).click();
-  await retryCells.nth(5).press("f");
-  await retryCells.nth(0).click();
-  await expect(page.getByText(/点击已满足的数字，安全打开/)).toBeVisible();
-  for (let stageIndex = 1; stageIndex < 5; stageIndex += 1) {
-    await page.getByRole("button", { name: "下一题" }).click();
-    const stageCells = page.locator(".academy-first-board button");
-    const displayFor = (underlyingIndex: number) => Array.from({ length: 25 }, (_, displayIndex) => displayIndex)
-      .find((displayIndex) => {
-        const x = displayIndex % 5;
-        const y = Math.floor(displayIndex / 5);
-        const variant = stageIndex % 4;
-        const mapped = variant === 1 ? y * 5 + (4 - x) : variant === 2 ? (4 - y) * 5 + (4 - x) : variant === 3 ? (4 - x) * 5 + y : displayIndex;
-        return mapped === underlyingIndex;
-      })!;
-    await stageCells.nth(displayFor(5)).press("f");
-    await stageCells.nth(displayFor(0)).click();
-    await expect(page.getByText(/点击已满足的数字，安全打开/)).toBeVisible();
-  }
-  await expect(page.getByText("未见迁移题")).toBeVisible();
-});
-
-for (const conceptId of [
-  "FOUNDATIONS_NEIGHBORHOOD",
-  "FOUNDATIONS_FORCED_RULES",
-  "REASONING_REMAINING_MINES",
-  "REASONING_SUBSETS",
-  "REASONING_PATTERNS",
-  "REASONING_UNCERTAINTY",
-  "PRACTICE_CHAINED_FRONTS",
-  "PRACTICE_TRANSFER",
-  "PRACTICE_REVIEW_CLINIC",
-] satisfies readonly LearningConceptId[]) {
-  test(`学院模块 ${conceptId} 可从演示完成到未见 checkpoint`, async ({ page }) => {
-    await page.goto(`/#/academy/practice/${conceptId}`);
-    for (let stageIndex = 0; stageIndex < 5; stageIndex += 1) {
-      await answerAcademyScenario(page, conceptId, stageIndex);
-      if (stageIndex < 4) await page.getByRole("button", { name: "下一题" }).click();
-    }
-    await expect(page.getByText("未见迁移题")).toBeVisible();
-  });
-}
-
-test("学院基础逻辑明确解释错误判断并进入不同的下一题", async ({ page }) => {
-  await page.goto("/#/academy/practice/FOUNDATIONS_NEIGHBORHOOD");
-  await expect(page.getByRole("heading", { name: "数字与八邻域" })).toBeVisible();
-  await page.getByRole("button", { name: /未知格 2行1列/ }).click();
-  await page.getByRole("button", { name: "检查判断" }).click();
-  await expect(page.getByText(/2行1列不能判为安全.*左上方是雷/)).toBeVisible();
-  await expect(page.locator(".academy-mini-board .is-explanation-source")).toHaveCount(1);
-
-  await page.getByRole("button", { name: "◆ 标雷" }).click();
-  await page.getByRole("button", { name: /未知格 2行1列/ }).click();
-  await page.getByRole("button", { name: "◇ 判安全" }).click();
-  await page.getByRole("button", { name: /未知格 2行3列/ }).click();
-  await page.getByRole("button", { name: "检查判断" }).click();
-  await page.getByRole("button", { name: "下一题" }).click();
-  await expect(page.getByRole("heading", { name: "数字与八邻域" })).toBeVisible();
-  await expect(page.locator(".academy-mini-board .cell-unknown")).toHaveCount(3);
-});
 
 test("375x812 首页进入单人后，初级棋盘右侧列可操作且页面不横溢", async ({
   page,
@@ -403,6 +209,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .locator(".solo-tabs")
     .getByRole("button", { name: /^高级 30×16/ });
   await expert.click();
+  await page.getByText("高级设置", { exact: true }).click();
   await page
     .getByRole("group", { name: "统计数据层级" })
     .getByRole("button", { name: "详细数据" })
@@ -426,6 +233,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
   await expect(expert).toHaveClass(/is-active/);
+  await page.getByText("高级设置", { exact: true }).click();
   await expect(
     page
       .getByRole("group", { name: "统计数据层级" })
@@ -462,8 +270,38 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
   await clickBoardCell(page, 40, 9, 9);
   await clickBoardCell(page, mineIndex, 9, 9);
   await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByText("最终 CPS", { exact: true })).toBeVisible();
+  await expect(page.getByText("本局未完成，不产生 3BV/s 和 IOE 成绩。")).toBeVisible();
   await page.getByRole("button", { name: "展开历史 · 1" }).click();
-  await expect(page.locator(".solo-history-list article")).toHaveCount(1);
+  const lossHistoryRow = page.locator(".solo-history-list article");
+  await expect(lossHistoryRow).toHaveCount(1);
+  await expect(lossHistoryRow).toContainText("3BV/s —");
+  await expect(lossHistoryRow).toContainText("IOE —");
+  const persistedLossMetrics = await page.evaluate(async () => {
+    return await new Promise<{ threeBvPerSecond: unknown; ioe: unknown }>(
+      (resolve, reject) => {
+        const request = indexedDB.open("h-minesweeper-solo-history-v1");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction("solo-runs-v1", "readonly");
+          const read = transaction.objectStore("solo-runs-v1").getAll();
+          read.onerror = () => reject(read.error);
+          read.onsuccess = () => {
+            const record = read.result[0] as {
+              metrics: { threeBvPerSecond: unknown; ioe: unknown };
+            };
+            resolve(record.metrics);
+          };
+          transaction.oncomplete = () => database.close();
+        };
+      },
+    );
+  });
+  expect(persistedLossMetrics).toMatchObject({
+    threeBvPerSecond: null,
+    ioe: null,
+  });
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
@@ -536,6 +374,46 @@ test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
   await expect.poll(() => page.locator(".replay-review-shell").innerText()).not.toMatch(/[\u3400-\u9fff]/u);
 });
 
+test("复盘中的问题可直接启动同规格专项练习", async ({ page }) => {
+  await useDeterministicSoloSeed(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await enterSolo(page);
+  const generated = createBoard({
+    width: 9,
+    height: 9,
+    mines: 10,
+    seed: FIXED_SEED,
+    startIndex: 40,
+    safeRadius: 1,
+  });
+  const mineIndex = generated.mines.findIndex((value) => value === 1);
+  await clickBoardCell(page, 40, 9, 9);
+  await clickBoardCell(page, mineIndex, 9, 9);
+  await page.getByRole("link", { name: "分析本局" }).click();
+  await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
+
+  const targetedPractice = page.getByRole("link", { name: "进入对应专项练习" }).first();
+  await expect(targetedPractice).toBeVisible();
+  await targetedPractice.click();
+
+  await expect(page).toHaveURL(/#\/solo\/practice\?/u);
+  await expect(page.getByText("引导练习", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/u })).toBeVisible();
+  await expect(page.locator(".practice-launch-context")).toContainText("针对上一局第");
+  await expect(page.locator(".practice-launch-context")).toContainText("新棋盘与原局不同");
+  await expect(page.getByText("练习记录 · 不计成绩", { exact: true }).first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    localStorage.getItem("hms-guided-practice-started-v1"),
+  )).toBe("1");
+});
+
+test("畸形专项练习地址不会应用无效棋盘配置", async ({ page }) => {
+  await page.goto("/#/solo/practice?source=bad%20id&w=999&h=9&m=10&step=0&error=WRONG_FLAG&mode=classic");
+  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "开始对局" })).toBeVisible();
+  await expect(page.getByRole("grid", { name: /扫雷棋盘/u })).toHaveCount(0);
+});
+
 test("确定性棋盘可完成胜局并写入历史", async ({ page }) => {
   await useDeterministicSoloSeed(page);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -565,6 +443,7 @@ test("确定性棋盘可完成胜局并写入历史", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
   await expect(page.locator(".replay-review-shell")).not.toContainText("这里不该点");
   await expect(page.locator(".replay-review-shell")).not.toContainText("复盘数据存在矛盾");
+  await expect(page.getByRole("link", { name: "进入对应专项练习" })).toHaveCount(0);
   await expect(page.getByText(/默认隐藏.*终局答案/)).toBeVisible();
   await page.getByRole("button", { name: "查看终局揭晓" }).click();
   await expect(page.getByText(/最终是(雷|安全格)/)).toBeVisible();
@@ -575,21 +454,6 @@ test("畸形复盘地址进入错误页而不是让应用崩溃", async ({ page 
   await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
   await expect(page.getByText("找不到这条本地记录。")).toBeVisible();
   await expect(page.getByRole("button", { name: "返回", exact: true })).toBeVisible();
-});
-
-test("学院在 localStorage 被禁用时仍可完成操作预热", async ({ page }) => {
-  await page.addInitScript(() => {
-    for (const method of ["getItem", "setItem", "removeItem"] as const) {
-      Object.defineProperty(Storage.prototype, method, {
-        configurable: true,
-        value: () => { throw new DOMException("blocked", "SecurityError"); },
-      });
-    }
-  });
-  await page.goto("/#/academy");
-  await expect(page.getByText(/本次仍可继续学习/)).toBeVisible();
-  await page.locator(".primer-grid button").click();
-  await expect(page.getByRole("button", { name: "下一步" })).toBeEnabled();
 });
 
 test("无猜生成超过五秒后回退，不制造终局记录", async ({ page }) => {

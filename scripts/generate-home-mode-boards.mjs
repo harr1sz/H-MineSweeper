@@ -35,28 +35,6 @@ const variants = [
       fill="none" stroke="#E4B85B" stroke-opacity="0.2" stroke-width="12"
       stroke-linecap="round" stroke-dasharray="2 26"/>`,
   },
-  {
-    id: "academy",
-    asset: "hero-academy-verified-v1.svg",
-    manifest: "hero-academy-verified-v1.manifest.json",
-    title: "Verified academy logic board",
-    description:
-      "A deterministic academy study board with highlighted deduction regions. Every visible number equals its adjacent mine count.",
-    accent: "#48D8D0",
-    rotation: -6,
-    translateX: 168,
-    translateY: 112,
-    mines: [
-      [3, 1], [7, 1], [9, 1], [2, 3], [5, 3],
-      [8, 3], [4, 4], [9, 4], [1, 5], [6, 5],
-      [8, 6], [3, 7], [6, 7], [9, 7],
-    ],
-    overlay: `<g fill="none" stroke="#48D8D0" stroke-width="4" stroke-opacity="0.62">
-      <rect x="178" y="91" width="268" height="181" rx="16"/>
-      <rect x="526" y="352" width="268" height="181" rx="16"/>
-      <path d="M446 181C506 202 506 357 526 442" stroke-dasharray="8 14"/>
-    </g>`,
-  },
 ];
 
 const numberColors = [

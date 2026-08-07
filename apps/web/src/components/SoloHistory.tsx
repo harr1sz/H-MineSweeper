@@ -14,6 +14,7 @@ import {
   type SoloRunRecord,
 } from "../lib/solo-history";
 import type { SoloBoardConfig, SoloPreset } from "../lib/solo";
+import { metricValuesForHistoryRecord } from "../lib/solo-metrics";
 import { useTelemetry } from "./TelemetryPrivacy";
 import { useLocale, type MessageDescriptor } from "../i18n";
 import type { HistoryImportWorkerResponse } from "../workers/historyImportWorker";
@@ -544,14 +545,16 @@ export function SoloHistory({
                   }}
                 />
               </label>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={busy || records.length === 0}
-                onClick={() => void exportHistory()}
-              >
-                {t("history.export")}
-              </button>
+              {records.length > 0 && (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void exportHistory()}
+                >
+                  {t("history.export")}
+                </button>
+              )}
               {invalidRecordCount > 0 && (
                 <button
                   className="secondary-button"
@@ -574,14 +577,16 @@ export function SoloHistory({
                     {t("history.exportLegacyRecovery")}
                   </button>
                 )}
-              <button
-                className="secondary-button solo-history-delete"
-                type="button"
-                disabled={busy || recordCount === 0}
-                onClick={() => void deleteHistory()}
-              >
-                {t("history.delete")}
-              </button>
+              {recordCount > 0 && (
+                <button
+                  className="secondary-button solo-history-delete"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void deleteHistory()}
+                >
+                  {t("history.delete")}
+                </button>
+              )}
             </div>
           </div>
 
@@ -593,7 +598,12 @@ export function SoloHistory({
             </div>
           ) : (
             <div className="solo-history-list">
-              {visibleRecords.slice(0, 20).map((record) => (
+              {visibleRecords.slice(0, 20).map((record) => {
+                const completionMetrics = metricValuesForHistoryRecord(
+                  record.outcome,
+                  record.metrics,
+                );
+                return (
                 <article key={record.recordId}>
                   <div>
                     <strong>
@@ -607,12 +617,12 @@ export function SoloHistory({
                     </small>
                   </div>
                   <b>{formatTime(record.metrics.elapsedMs)}</b>
-                  <span>3BV/s {formatMetric(record.metrics.threeBvPerSecond)}</span>
+                  <span>3BV/s {formatMetric(completionMetrics.threeBvPerSecond)}</span>
                   <span>
                     IOE{" "}
-                    {record.metrics.ioe === null
+                    {completionMetrics.ioe === null
                       ? "—"
-                      : `${(record.metrics.ioe * 100).toFixed(1)}%`}
+                      : `${(completionMetrics.ioe * 100).toFixed(1)}%`}
                   </span>
                   <span>{t("history.actions", { count: record.metrics.semanticActions })}</span>
                   {record.schemaVersion === 1 ? (
@@ -627,7 +637,7 @@ export function SoloHistory({
                     </a>
                   )}
                 </article>
-              ))}
+              );})}
               {visibleRecords.length > 20 && (
                 <p>{t("history.latestTwenty")}</p>
               )}

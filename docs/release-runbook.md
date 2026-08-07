@@ -166,7 +166,7 @@ gateway reload or replacement followed by the same smoke checks.
 
 Use a clean browser profile with no stored state and verify:
 
-- the home page, Academy, and solo game load directly without an access prompt;
+- the home page and standard or guided Solo load directly without an access prompt;
 - no account, code, allowlist, enrollment, or telemetry preference is required
   before the first board;
 - `/live`, `/ready`, `/version`, and compatibility `/health`;

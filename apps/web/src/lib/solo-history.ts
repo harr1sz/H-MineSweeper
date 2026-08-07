@@ -18,6 +18,7 @@ import {
   type BoardSpec,
   type CountedBoardActionType,
 } from "@h-minesweeper/game-core";
+import { isSoloCompletionMetricEligible } from "./solo-metrics";
 
 export const SOLO_RUN_SCHEMA_VERSION = 1 as const;
 export const SOLO_RUN_SCHEMA_VERSION_V2 = 2 as const;
@@ -2389,7 +2390,9 @@ export function calculateSoloTrend(
       ),
     )
     .sort((left, right) => right.completedAt.localeCompare(left.completedAt));
-  const wins = comparable.filter((record) => record.outcome === "WON");
+  const wins = comparable.filter((record) =>
+    isSoloCompletionMetricEligible(record.outcome),
+  );
   const latest = wins[0];
   const elapsed = wins.map((record) => record.metrics.elapsedMs);
   const speeds = wins.flatMap((record) =>

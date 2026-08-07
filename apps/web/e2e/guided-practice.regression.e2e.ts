@@ -297,7 +297,6 @@ interface StandardScoreState {
   readonly standardReplays: readonly unknown[];
   readonly legacyPersonalBests: readonly unknown[];
   readonly legacyBestSource: string | null;
-  readonly academyProgress: string | null;
 }
 
 async function readStandardScoreState(page: Page): Promise<StandardScoreState> {
@@ -327,7 +326,6 @@ async function readStandardScoreState(page: Page): Promise<StandardScoreState> {
       standardReplays: normalize(await readAll("solo-replays-v1")),
       legacyPersonalBests: normalize(await readAll("legacy-personal-bests-v1")),
       legacyBestSource: localStorage.getItem("hms-solo-best-v1:9x9:10:classic"),
-      academyProgress: localStorage.getItem("hms-academy-progress-v2"),
     };
     database.close();
     return snapshot;
@@ -431,9 +429,10 @@ test("guided practice stays score-isolated and saves a verified practice replay"
 
   await expect(page.getByRole("heading", { name: "实时教练" })).toBeVisible();
   await expect(page.getByText("练习记录 · 不计成绩").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "立即提示" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "示范下一步" })).toBeEnabled();
-  await expect(page.getByText("自动标雷", { exact: true })).toBeVisible();
+  await expect(page.getByText("本局任务：在棋盘任意位置揭开一格。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "立即提示" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "示范下一步" })).toHaveCount(0);
+  await expect(page.getByText("自动标雷", { exact: true })).toHaveCount(0);
 
   const firstIndex = 40;
   const board = createBoard({
@@ -447,6 +446,9 @@ test("guided practice stays score-isolated and saves a verified practice replay"
   const mineIndex = board.mines.findIndex((value) => value === 1);
   expect(mineIndex).toBeGreaterThanOrEqual(0);
   await clickBoardCell(page, firstIndex);
+  await expect(page.getByRole("button", { name: "立即提示" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "示范下一步" })).toBeEnabled();
+  await expect(page.getByText("自动标雷", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "立即提示" }).click();
   await expect(page.locator(".practice-coach-message")).not.toContainText("正在分析");
   await clickBoardCell(page, mineIndex);
@@ -492,7 +494,7 @@ test("guided practice stays score-isolated and saves a verified practice replay"
   await expect(page.getByText(/已验证 \d+ 个练习事件/u)).toBeVisible();
 });
 
-test("a practice terminal leaves existing standard history, PB, trend input, and Academy mastery unchanged", async ({
+test("a practice terminal leaves existing standard history, PB, and trend input unchanged", async ({
   page,
 }) => {
   await useDeterministicPracticeEnvironment(page);
@@ -503,16 +505,6 @@ test("a practice terminal leaves existing standard history, PB, trend input, and
       completedAt: Date.UTC(2026, 7, 1, 8),
       metricRulesVersion: "HMS-statistics-v1",
       trustStatus: "LOCAL_UNVERIFIED",
-    }));
-    localStorage.setItem("hms-academy-progress-v2", JSON.stringify({
-      version: 2,
-      completedExerciseIds: ["c0-all-mine", "c0-satisfied"],
-      attempts: 4,
-      correctAttempts: 4,
-      hintRequests: 0,
-      highestHintByExercise: {},
-      recentAttemptsByExercise: {},
-      updatedAt: Date.UTC(2026, 7, 1, 9),
     }));
   });
 
@@ -534,7 +526,7 @@ test("a practice terminal leaves existing standard history, PB, trend input, and
 
   await page.getByRole("button", { name: "返回首页" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "重新配置" }).click();
   await page.getByRole("button", { name: "引导练习" }).click();
   await page.locator(".solo-setup-section")
     .filter({ hasText: "生成规则" })

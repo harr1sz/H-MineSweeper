@@ -9,11 +9,15 @@ import type { ReplayWorkerResponse } from "../workers/replayWorker";
 import {
   cellCoordinates,
   explainReplayStep,
-  learningConceptForReview,
   type ReviewActionSuggestion,
   type ReviewStepExplanation,
   type ReviewStepVerdict,
 } from "../lib/replay-explanations";
+import {
+  buildPracticeLaunchHash,
+  practiceErrorCategoryForVerdict,
+  type PracticeTriggerVerdict,
+} from "../lib/practice-launch";
 import { ReplayBoard, type ReplayBoardCellState } from "./ReplayBoard";
 import "./replay-review.css";
 import { useLocale, type MessageDescriptor, type MessageId } from "../i18n";
@@ -71,13 +75,6 @@ const PROOF_RULE_MESSAGE_IDS: Readonly<
   CSP_SAFE: "replay.rule.cspSafe",
 };
 
-function conceptForMoment(moment: ReviewMoment): string {
-  return learningConceptForReview({
-    verdict: moment.explanation.verdict,
-    ...(moment.explanation.targetProof ? { proof: moment.explanation.targetProof } : {}),
-  });
-}
-
 function isPrimaryMoment(verdict: ReviewStepVerdict): boolean {
   return [
     "PROVABLE_MINE_REVEALED",
@@ -88,6 +85,17 @@ function isPrimaryMoment(verdict: ReviewStepVerdict): boolean {
     "CORRECT_MINE_FLAG",
     "CORRECT_WRONG_FLAG_REMOVED",
     "PROVABLE_MINE_UNFLAGGED",
+  ].includes(verdict);
+}
+
+function isPracticeTriggerVerdict(
+  verdict: ReviewStepVerdict,
+): verdict is PracticeTriggerVerdict {
+  return [
+    "PROVABLE_MINE_REVEALED",
+    "PROVABLE_SAFE_FLAGGED",
+    "WRONG_FLAG_CHORD_CHAIN",
+    "UNCERTAIN_LOSS",
   ].includes(verdict);
 }
 
@@ -176,12 +184,9 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
       if (!action || !explanation || !isPrimaryMoment(explanation.verdict)) return [];
       return [{ index, seq: step.seq, action, explanation } satisfies ReviewMoment];
     });
-    const mistakes = candidates.filter(({ explanation }) => [
-      "PROVABLE_MINE_REVEALED",
-      "PROVABLE_SAFE_FLAGGED",
-      "WRONG_FLAG_CHORD_CHAIN",
-      "UNCERTAIN_LOSS",
-    ].includes(explanation.verdict));
+    const mistakes = candidates.filter(({ explanation }) =>
+      isPracticeTriggerVerdict(explanation.verdict),
+    );
     const representativeCorrect = candidates.filter(({ explanation }) => [
       "CORRECT_SAFE_REVEAL",
       "CORRECT_MINE_FLAG",
@@ -413,7 +418,19 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
             <p>{actionText(moment.action, moment.index)}</p>
             <div className="replay-moment-actions">
               <button type="button" onClick={() => selectStep(moment.index)}>{t("replay.reviewThisStep")}</button>
-              <a href={`#/academy/practice/${conceptForMoment(moment)}?mode=${record?.config.generationMode ?? "classic"}&width=${record?.config.width ?? 9}&height=${record?.config.height ?? 9}&mines=${record?.config.mines ?? 10}&verdict=${moment.explanation.verdict}`}>{t("replay.practice")}</a>
+              {record && isPracticeTriggerVerdict(moment.explanation.verdict) && (
+                <a href={buildPracticeLaunchHash({
+                  sourceRecordId: record.recordId,
+                  board: {
+                    width: record.config.width,
+                    height: record.config.height,
+                    mines: record.config.mines,
+                  },
+                  originalGenerationMode: record.config.generationMode,
+                  errorCategory: practiceErrorCategoryForVerdict(moment.explanation.verdict),
+                  replayStep: moment.seq,
+                })}>{t("replay.practice")}</a>
+              )}
             </div>
           </article>)}</div>}
       </section>

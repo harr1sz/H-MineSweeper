@@ -3,7 +3,13 @@ import type {
   VisibleBoardProof,
 } from "@h-minesweeper/game-core";
 import type { SoloReplayV1 } from "./solo-history";
-import type { LearningConceptId } from "./learning-contracts";
+
+export type ReviewConceptId =
+  | "FOUNDATIONS_FORCED_RULES"
+  | "REASONING_REMAINING_MINES"
+  | "REASONING_SUBSETS"
+  | "REASONING_UNCERTAINTY"
+  | "PRACTICE_SAFE_CHORD";
 
 export type ReviewStepVerdict =
   | "PROVABLE_MINE_REVEALED"
@@ -28,7 +34,7 @@ export interface ReviewActionSuggestion {
   readonly column: number;
   readonly action: "REVEAL" | "FLAG" | "UNFLAG_THEN_REVEAL";
   readonly proof: VisibleBoardProof;
-  readonly conceptId: LearningConceptId;
+  readonly conceptId: ReviewConceptId;
 }
 
 export interface HumanProofChain {
@@ -71,7 +77,7 @@ function compareProofs(left: VisibleBoardProof, right: VisibleBoardProof): numbe
 export function learningConceptForReview(input: {
   readonly verdict?: ReviewStepVerdict;
   readonly proof?: Pick<VisibleBoardProof, "rule">;
-}): LearningConceptId {
+}): ReviewConceptId {
   if (input.verdict === "WRONG_FLAG_CHORD_CHAIN") return "PRACTICE_SAFE_CHORD";
   if (input.verdict === "UNCERTAIN_LOSS" || input.verdict === "NO_DETERMINISTIC_MOVE" || input.verdict === "UNDETERMINED_FLAG_REMOVED") {
     return "REASONING_UNCERTAINTY";

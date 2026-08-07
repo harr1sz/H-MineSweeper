@@ -119,9 +119,12 @@ async function doubleClickBoardCell(page: Page, index: number): Promise<void> {
 }
 
 test("安全操作从 ×2 展示，重复点击和无效双击保持连击中立", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await useDeterministicSoloEnvironment(page);
   await enterClassicSolo(page);
   const [first, second, third, fourth] = acceptedSafeRevealSequence();
+  const board = page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/u });
+  const boardBeforeCombo = await board.boundingBox();
   await clickBoardCell(page, first!);
   await expect(page.locator(".flow-combo")).toHaveCount(0);
   await clickBoardCell(page, second!);
@@ -130,11 +133,25 @@ test("安全操作从 ×2 展示，重复点击和无效双击保持连击中立
   await expect(secondCombo).toContainText("连击");
   await expect(secondCombo).toContainText("×2");
   await expect(secondCombo).toHaveClass(/combo-2/u);
-  await expect.poll(() => secondCombo.evaluate((element) => getComputedStyle(element).animationName))
-    .toBe("combo-pulse");
+  await expect(secondCombo).toBeVisible();
+  await expect(page.locator(".board-toolbar .flow-combo")).toHaveCount(1);
   await expect.poll(() => secondCombo.locator(".flow-combo-progress > div").evaluate(
     (element) => getComputedStyle(element).animationName,
   )).toBe("combo-countdown");
+  const boardAfterCombo = await board.boundingBox();
+  const comboBox = await secondCombo.boundingBox();
+  expect(boardAfterCombo).toEqual(boardBeforeCombo);
+  expect(comboBox).not.toBeNull();
+  expect(boardAfterCombo).not.toBeNull();
+  if (comboBox && boardAfterCombo) {
+    const intersects = !(
+      comboBox.x + comboBox.width <= boardAfterCombo.x ||
+      boardAfterCombo.x + boardAfterCombo.width <= comboBox.x ||
+      comboBox.y + comboBox.height <= boardAfterCombo.y ||
+      boardAfterCombo.y + boardAfterCombo.height <= comboBox.y
+    );
+    expect(intersects).toBe(false);
+  }
   const secondHandle = await secondCombo.elementHandle();
   const countdown = secondCombo.locator(".flow-combo-progress > div");
   const beforeFlagMs = await countdown.evaluate((element) =>
@@ -167,6 +184,7 @@ test("安全操作从 ×2 展示，重复点击和无效双击保持连击中立
 });
 
 test("系统减少动态效果时，连击改用静态颜色反馈", async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 720 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await useDeterministicSoloEnvironment(page);
   await enterClassicSolo(page);
@@ -183,6 +201,13 @@ test("系统减少动态效果时，连击改用静态颜色反馈", async ({ pa
     animationName: getComputedStyle(element).animationName,
     opacity: getComputedStyle(element).opacity,
   }))).toEqual({ animationName: "none", opacity: "0.55" });
+  const boardBox = await page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/u }).boundingBox();
+  const comboBox = await combo.boundingBox();
+  expect(boardBox).not.toBeNull();
+  expect(comboBox).not.toBeNull();
+  if (boardBox && comboBox) {
+    expect(comboBox.y + comboBox.height).toBeLessThanOrEqual(boardBox.y);
+  }
 });
 
 test("高连击连续增长时会轮换鼓励文案", async ({ page }) => {
@@ -190,6 +215,9 @@ test("高连击连续增长时会轮换鼓励文案", async ({ page }) => {
   await enterClassicSolo(page);
   const safeReveals = acceptedSafeRevealSequence(14);
   const highStreakMessages: string[] = [];
+  const board = page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/u });
+  const boardBeforeCombo = await board.boundingBox();
+  const scrollBeforeCombo = await page.evaluate(() => window.scrollY);
 
   for (const [index, cellIndex] of safeReveals.entries()) {
     await clickBoardCell(page, cellIndex);
@@ -200,4 +228,36 @@ test("高连击连续增长时会轮换鼓励文案", async ({ page }) => {
 
   await expect(page.locator(".flow-combo")).toContainText("×14");
   expect(new Set(highStreakMessages).size).toBe(highStreakMessages.length);
+  const comboBox = await page.locator(".flow-combo").boundingBox();
+  const boardAtHighCombo = await board.boundingBox();
+  const scrollAtHighCombo = await page.evaluate(() => window.scrollY);
+  expect(boardAtHighCombo && boardBeforeCombo ? {
+    x: boardAtHighCombo.x,
+    y: boardAtHighCombo.y + scrollAtHighCombo,
+    width: boardAtHighCombo.width,
+    height: boardAtHighCombo.height,
+  } : boardAtHighCombo).toEqual(boardBeforeCombo ? {
+    x: boardBeforeCombo.x,
+    y: boardBeforeCombo.y + scrollBeforeCombo,
+    width: boardBeforeCombo.width,
+    height: boardBeforeCombo.height,
+  } : boardBeforeCombo);
+  expect(comboBox).not.toBeNull();
+  if (comboBox && boardAtHighCombo) {
+    expect(comboBox.y + comboBox.height).toBeLessThanOrEqual(boardAtHighCombo.y);
+  }
+  await expect(page.locator(".flow-combo")).toHaveCount(0, { timeout: 4_000 });
+  const boardAfterCombo = await board.boundingBox();
+  const scrollAfterCombo = await page.evaluate(() => window.scrollY);
+  expect(boardAfterCombo && boardBeforeCombo ? {
+    x: boardAfterCombo.x,
+    y: boardAfterCombo.y + scrollAfterCombo,
+    width: boardAfterCombo.width,
+    height: boardAfterCombo.height,
+  } : boardAfterCombo).toEqual(boardBeforeCombo ? {
+    x: boardBeforeCombo.x,
+    y: boardBeforeCombo.y + scrollBeforeCombo,
+    width: boardBeforeCombo.width,
+    height: boardBeforeCombo.height,
+  } : boardBeforeCombo);
 });
