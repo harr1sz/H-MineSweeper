@@ -7,7 +7,7 @@ Last updated: 2026-07-30
 H-MineSweeper's public-access Alpha has one primary product:
 
 1. **Professional solo training** is the product and the Alpha North Star.
-2. **Minesweeper Academy** is a supporting learning entry point.
+2. **Guided practice** is a non-scoring Solo path using visible-board proofs.
 3. **1v1** is an independently switchable experiment. A duel-only failure turns
    off the duel surface and must not block healthy public solo.
 
@@ -18,7 +18,7 @@ public Beta, or product-market-fit proof.
 
 | Term | Meaning | Exit condition |
 | --- | --- | --- |
-| Phase 0.5 | A functional prototype with public-access solo, Academy, and experimental 1v1 paths | Remains the product-validation phase until public Alpha evidence is decision-ready |
+| Phase 0.5 | A functional prototype with public-access Solo, guided practice, and experimental 1v1 paths | Remains the product-validation phase until public Alpha evidence is decision-ready |
 | Alpha RC | A versioned, deployable candidate with the required engineering and operational gates | All applicable M0–M2 gates pass for that immutable artifact |
 | Phase 1 complete | The professional-solo hypothesis has enough evidence to expand | Predeclared public Alpha metrics, observation windows, and missing-data rules are satisfied, with no unresolved solo data-integrity stop condition |
 

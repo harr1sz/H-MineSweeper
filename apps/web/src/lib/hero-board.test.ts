@@ -30,11 +30,6 @@ const verifiedAssets = [
     manifest: "hero-solo-verified-v1.manifest.json",
     svg: "hero-solo-verified-v1.svg",
   },
-  {
-    name: "academy board",
-    manifest: "hero-academy-verified-v1.manifest.json",
-    svg: "hero-academy-verified-v1.svg",
-  },
 ] as const;
 
 function publicAssetUrl(asset: string): URL {

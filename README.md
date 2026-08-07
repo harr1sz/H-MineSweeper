@@ -17,7 +17,7 @@
 
 ## 中文
 
-H-MineSweeper 是一个黑金风格的专业单人扫雷训练项目。单人训练是当前唯一主产品；扫雷学院是辅助学习入口；同图实时 1v1 是可以独立关闭的实验功能。
+H-MineSweeper 是一个黑金风格的专业单人扫雷训练项目。单人训练是当前唯一主产品；引导练习内置于 Solo；同图实时 1v1 是可以独立关闭的实验功能。
 
 这个仓库仍处于 Phase 0.5，正在建设 `v0.2.0-alpha.N` 公开访问候选版本。公开 Alpha 无账号、访问码、白名单或封闭研究门槛。Phase 1 只有在公开 Alpha 的指标定义、观察窗口和缺失数据规则预先冻结，并由真实公开流量得到足够证据后才算完成；代码合并、CI 通过、Alpha RC 部署或功能数量增加都不等于产品验证完成。
 
@@ -26,7 +26,7 @@ H-MineSweeper 是一个黑金风格的专业单人扫雷训练项目。单人训
 | 模式 | 当前能力 | 成绩状态 |
 | --- | --- | --- |
 | 专业单人训练 | 初级、中级、高级、自定义、经典随机、无猜生成、本地历史与同规格趋势 | `LOCAL_UNVERIFIED`，不进入公开榜 |
-| 扫雷学院 | 第 0 至 3 章、分级提示、proof 验证、定式与反例 | 辅助学习结果 |
+| 引导练习 | 可见信息教练、即时提示、下一步示范、独立练习历史与复盘 | 不计标准成绩、PB 或趋势 |
 | 实验 1v1 | 房间码竞速、Bo3、进度对比、即时重赛 | Feature Flag 控制，无正式评级 |
 
 ### 单人游戏
@@ -39,16 +39,14 @@ H-MineSweeper 是一个黑金风格的专业单人扫雷训练项目。单人训
 - 三套棋盘显示方案覆盖舒适、专业和高对比场景。
 - 数字、旗帜、雷标和错旗均由 Canvas 矢量绘制，在高级棋盘的小格尺寸下仍保持清楚。
 
-### 扫雷学院
+### 引导练习
 
-学院不要求玩家背脱离棋形的口诀。每道题都从当前可见状态推导答案。
+引导练习使用完整棋盘教学，不恢复课程树。教练只根据玩家当前可见的数字、盖住格和旗标给出可证明的下一步。
 
-- 第 0 章：揭格、插旗、和弦和数字含义。
-- 第 1 章：剩余雷数、已标雷与矛盾。
-- 第 2 章：共有区、独享区和集合包含。
-- 第 3 章：1-2-1、1-2-2-1 及其反例。
-- H1 至 H7 提示会逐级展开。高级提示来自求解器 proof，不读取隐藏雷图猜答案。
-- 课程进度和练习结果保存在本机；当前 Logic Streak 只代表本次页面会话，不宣称跨会话连续记录。
+- 首击前只要求玩家在任意位置揭开一格。
+- 棋盘停滞后可请求提示或示范下一步；自动标雷仅标记能被单个可见数字直接证明的雷。
+- 练习记录和复盘保存在本机，并与标准成绩、PB 和趋势严格隔离。
+- 从标准局复盘可针对上一局的具体错误启动同规格无猜引导练习，但不会复制原棋盘。
 
 ### 实验 1v1
 
@@ -112,7 +110,7 @@ pnpm dev
 
 ### 公开 Alpha 与遥测边界
 
-公开 Alpha 的产品政策是无访问门槛：全新浏览器应能直接打开首页、进入学院和开始单人游戏，不需要账号、登记或研究同意。仓库实现已移除旧的邀请码访问控制；公开遥测会话只授权偏好与事件接口，不解锁任何产品路由，并固定标记为 `public/unsegmented`。在不可变部署产物通过匿名访问 smoke 前，这些本地实现仍不能作为 M2 Alpha RC 证据。
+公开 Alpha 的产品政策是无访问门槛：全新浏览器应能直接打开首页并开始标准或引导 Solo，不需要账号、登记或研究同意。仓库实现已移除旧的邀请码访问控制；公开遥测会话只授权偏好与事件接口，不解锁任何产品路由，并固定标记为 `public/unsegmented`。在不可变部署产物通过匿名访问 smoke 前，这些本地实现仍不能作为 M2 Alpha RC 证据。
 
 假名化原始事件和公开会话状态固定保留 7 天，到期删除，不因分析或产品研究延长；去除安装 ID 和单人明细的日聚合最多保留 30 天。用户可以退出遥测并删除仍在保留期内的可归属原始事件，本地历史不受影响。
 
@@ -129,7 +127,7 @@ pnpm dev
 ### 工程结构
 
 ```text
-apps/web             React 19、Vite 8、Canvas 2D、单人游戏与扫雷学院
+apps/web             React 19、Vite 8、Canvas 2D、单人游戏、引导练习与复盘
 apps/server          Fastify 5、ws 8、REST、实时网关与房间 Actor
 packages/game-core   PRNG、棋盘规则、求解器、协议、统计与 golden vectors
 scripts              品牌资产、发布验证、合成探针与回滚校验
@@ -187,7 +185,7 @@ H-MineSweeper 使用 [MIT License](./LICENSE) 开源。欢迎提交 issue 和外
 
 ## English
 
-H-MineSweeper is a black-and-gold professional solo Minesweeper training project. Solo training is the only primary product in this Alpha; the Academy is a supporting learning entry point; same-board real-time 1v1 is an independently switchable experiment.
+H-MineSweeper is a black-and-gold professional solo Minesweeper training project. Solo training is the only primary product in this Alpha; guided practice is built into Solo; same-board real-time 1v1 is an independently switchable experiment.
 
 The repository remains at Phase 0.5 while it builds `v0.2.0-alpha.N` public-access candidates. The public Alpha has no account, access-code, allowlist, or closed-research gate. Phase 1 closes only after metric definitions, observation windows, and missing-data rules are frozen in advance and real public traffic supplies sufficient evidence. A merge, green CI run, deployed Alpha RC, or larger feature count is not product validation.
 
@@ -196,7 +194,7 @@ The repository remains at Phase 0.5 while it builds `v0.2.0-alpha.N` public-acce
 | Mode | Available now | Result status |
 | --- | --- | --- |
 | Professional solo | Beginner, Intermediate, Expert, custom boards, classic random, no-guess generation, local history, and like-for-like trends | `LOCAL_UNVERIFIED`, not eligible for a public leaderboard |
-| Academy | Chapters 0 through 3, staged hints, proof checks, patterns and counterexamples | Supporting learning result |
+| Guided practice | Visible-information coaching, hints, next-step demonstrations, separate practice history, and replay | Excluded from standard results, PBs, and trends |
 | Experimental 1v1 | Room-code racing, best of three, progress comparison, instant rematch | Feature-flagged, no official rating |
 
 ### Solo play
@@ -209,16 +207,14 @@ The repository remains at Phase 0.5 while it builds `v0.2.0-alpha.N` public-acce
 - The board has comfortable, professional, and high-contrast display profiles.
 - Numbers, flags, mines, and incorrect flags are drawn as Canvas vectors so they remain readable on the smaller Expert cells.
 
-### Minesweeper Academy
+### Guided practice
 
-The Academy teaches deductions from the visible board instead of asking players to memorize number strings without context.
+Guided practice teaches on full boards instead of restoring a curriculum tree. The coach derives only provable moves from the numbers, covered cells, and flags currently visible to the player.
 
-- Chapter 0 covers revealing, flagging, chording, and number meaning.
-- Chapter 1 covers remaining mine counts, known mines, and contradictions.
-- Chapter 2 introduces shared cells, exclusive cells, and set inclusion.
-- Chapter 3 covers 1-2-1, 1-2-2-1, and counterexamples.
-- Hints progress from H1 to H7. Advanced hints come from solver proofs and never inspect hidden mines to invent an answer.
-- Course progress and practice results stay on the local device. The current Logic Streak describes only the active page session; it is not presented as a cross-session streak.
+- Before the first reveal, the only task is to reveal any cell.
+- After play begins, the player can request a hint or a next-step demonstration. Auto-mark only flags mines directly proved by one visible number.
+- Practice history and replay stay local and remain separate from standard results, PBs, and trends.
+- A standard replay can launch a same-size no-guess practice session for the observed mistake without copying the original board.
 
 ### Experimental real-time 1v1
 
@@ -286,7 +282,7 @@ See [`.env.example`](./.env.example) for the remaining settings.
 ### Public Alpha and telemetry boundary
 
 The product policy is ungated public access. A fresh browser must be able to
-open the home page, enter the Academy, and start solo play without an account,
+open the home page and start standard or guided Solo without an account,
 credential, registration, or research consent. The repository implementation
 has removed the legacy invitation gate. Its public telemetry session authorizes
 only preference and event endpoints, unlocks no product route, and is fixed to
@@ -321,7 +317,7 @@ healthy local solo unavailable. `/health` remains a compatibility alias for
 ### Repository layout
 
 ```text
-apps/web             React 19, Vite 8, Canvas 2D, solo play, and the Academy
+apps/web             React 19, Vite 8, Canvas 2D, solo play, guided practice, and replay
 apps/server          Fastify 5, ws 8, REST, real-time gateway, and room actors
 packages/game-core   PRNG, board rules, solver, protocol, metrics, and golden vectors
 scripts              Brand assets, release checks, synthetic probes, and rollback verification

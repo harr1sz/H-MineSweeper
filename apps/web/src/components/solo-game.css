@@ -67,6 +67,31 @@
   gap: 16px;
 }
 
+.solo-setup-advanced {
+  border: 1px solid rgba(231, 176, 74, 0.22);
+  background: rgba(8, 10, 13, 0.48);
+  margin-bottom: 26px;
+}
+
+.solo-setup-advanced > summary {
+  padding: 14px 16px;
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.solo-setup-advanced[open] > summary {
+  border-bottom: 1px solid rgba(231, 176, 74, 0.16);
+}
+
+.solo-setup-advanced .solo-custom-grid,
+.solo-setup-advanced .solo-setup-section-split {
+  margin: 14px;
+}
+
 .solo-setup-heading {
   display: flex;
   align-items: center;
@@ -361,7 +386,7 @@
 .solo-stats span,
 .solo-proof span {
   color: var(--faint);
-  font: 650 8px var(--mono);
+  font: 650 10px var(--mono);
   letter-spacing: 0.08em;
 }
 
@@ -498,16 +523,14 @@
 
 .solo-analysis b {
   color: var(--ink);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .flow-combo {
-  position: absolute;
-  z-index: 7;
-  top: 58px;
-  right: 18px;
   display: grid;
-  min-width: 142px;
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
   border: 1px solid rgb(228 184 91 / 52%);
   background:
     linear-gradient(135deg, rgb(255 217 137 / 12%), transparent 68%),
@@ -515,28 +538,40 @@
   box-shadow:
     inset 0 1px 0 rgb(255 217 137 / 18%),
     0 14px 40px rgb(0 0 0 / 38%);
-  padding: 11px 13px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
   pointer-events: none;
   animation: combo-pulse 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .flow-combo span {
   color: var(--muted);
-  font: 700 7px var(--mono);
+  font: 700 10px var(--mono);
   letter-spacing: 0.14em;
 }
 
 .flow-combo strong {
   color: var(--gold-highlight);
-  font: 800 29px/1 var(--mono);
-  margin: 5px 0 3px;
+  font: 800 18px/1 var(--mono);
   text-shadow: 0 0 22px rgb(228 184 91 / 24%);
 }
 
 .flow-combo em {
   color: var(--ink);
+  overflow: hidden;
   font: 650 10px var(--mono);
   font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-combo-slot {
+  width: 178px;
+  min-width: 178px;
+  height: 40px;
+  margin-left: auto;
 }
 
 .flow-combo.combo-4 {
@@ -561,8 +596,9 @@
 }
 
 .flow-combo-progress {
+  grid-column: 1 / -1;
   height: 2px;
-  margin-top: 9px;
+  margin-top: 1px;
   overflow: hidden;
   background: rgb(255 255 255 / 10%);
 }

@@ -67,6 +67,53 @@ function manualBoard(
   };
 }
 
+function minimumClicksByExhaustiveCover(board: Board): number {
+  const safe = Array.from(board.mines, (mine, index) => mine === 0 ? index : -1)
+    .filter((index) => index >= 0);
+  if (safe.length === 0) return 0;
+  const safePosition = new Map(safe.map((index, position) => [index, position]));
+  const targetMask = (1 << safe.length) - 1;
+  const clickMasks = safe.map((startIndex) => {
+    const revealed = new Set<number>([startIndex]);
+    if (board.adjacent[startIndex] === 0) {
+      const queue = [startIndex];
+      for (let head = 0; head < queue.length; head += 1) {
+        const current = queue[head]!;
+        for (const neighbor of getNeighborIndices(
+          board.spec.width,
+          board.spec.height,
+          current,
+        )) {
+          if (board.mines[neighbor] === 1) continue;
+          if (!revealed.has(neighbor)) revealed.add(neighbor);
+          if (board.adjacent[neighbor] === 0 && !queue.includes(neighbor)) {
+            queue.push(neighbor);
+          }
+        }
+      }
+    }
+    let mask = 0;
+    for (const index of revealed) {
+      mask |= 1 << safePosition.get(index)!;
+    }
+    return mask;
+  });
+
+  let minimum = safe.length;
+  for (let subset = 0; subset < 1 << clickMasks.length; subset += 1) {
+    let clicks = 0;
+    let covered = 0;
+    for (let index = 0; index < clickMasks.length; index += 1) {
+      if ((subset & (1 << index)) === 0) continue;
+      clicks += 1;
+      if (clicks >= minimum) break;
+      covered |= clickMasks[index]!;
+    }
+    if (covered === targetMask) minimum = Math.min(minimum, clicks);
+  }
+  return minimum;
+}
+
 describe("public constants and validation", () => {
   it("publishes the fixed protocol, classic presets, and 32 unique seeds", () => {
     expect(PROTOCOL_VERSION).toBe(2);
@@ -285,6 +332,23 @@ describe("game actions", () => {
 });
 
 describe("versioned board and player statistics", () => {
+  it("matches an independent minimum-click oracle for all 594 boards up to 3 by 3", () => {
+    let checked = 0;
+    for (const [width, height] of [[1, 1], [2, 2], [3, 2], [3, 3]] as const) {
+      const cellCount = width * height;
+      for (let mineMask = 0; mineMask < 1 << cellCount; mineMask += 1) {
+        const mineIndexes: number[] = [];
+        for (let index = 0; index < cellCount; index += 1) {
+          if ((mineMask & (1 << index)) !== 0) mineIndexes.push(index);
+        }
+        const board = manualBoard(width, height, mineIndexes, 0);
+        expect(calculate3BV(board).value).toBe(minimumClicksByExhaustiveCover(board));
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(594);
+  });
+
   it("computes stable 3BV golden values for openings and isolated numbers", () => {
     expect(calculate3BV(manualBoard(5, 5, [24], 0))).toEqual({
       rulesVersion: THREE_BV_RULES_VERSION,

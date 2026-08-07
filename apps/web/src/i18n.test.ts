@@ -28,7 +28,6 @@ describe("locale contract", () => {
     expect(formatEnglishCount(2, "record")).toBe("2 records");
     expect(translate("en-US", "solo.resultActions", { count: 1 })).toBe("1 action");
     expect(translate("en-US", "solo.resultActions", { count: 2 })).toBe("2 actions");
-    expect(translate("en-US", "academy.reasonSelected", { count: 1 })).toContain("1 clue selected");
     expect(translate("en-US", "replay.verifiedHuman", { count: 0 })).toContain("0 steps");
     expect(translate("en-US", "replay.verifiedHuman", { count: 1 })).toContain("1 step");
     expect(translate("en-US", "replay.verifiedHuman", { count: 2 })).toContain("2 steps");
@@ -46,12 +45,6 @@ describe("locale contract", () => {
     expect(translate("en-US", "solo.setup.title")).toBe("Set up a solo game");
     expect(translate("en-US", "solo.generation")).toBe("Board generation");
     expect(translate("en-US", "status.noNetwork")).toBe("NO NETWORK REQUIRED");
-    expect(translate("en-US", "academy.freePractice")).toBe("Skill drills");
-    expect(translate("en-US", "academy.coach")).toBe("Coach mode");
-    expect(translate("en-US", "academy.coach")).not.toBe(
-      translate("en-US", "practice.setup.guided"),
-    );
-    expect(translate("en-US", "academy.h7")).not.toMatch(/\bH7\b/u);
   });
 
   it("keeps guided-practice copy bilingual and honest about visible information", () => {

@@ -25,10 +25,12 @@ import {
 import { formatDuration, formatRtt, normalizeRoomCode } from "./lib/format";
 import { percentile, recordMetric } from "./lib/performance";
 import type { SoloBoardConfig, SoloGenerationMode } from "./lib/solo";
+import { loadSoloPreferences } from "./lib/solo-preferences";
 import type { SoloSessionKind } from "./lib/practice-coach";
+import { purgeRetiredAcademyProgress } from "./lib/retired-academy";
+import { parsePracticeLaunchContext } from "./lib/practice-launch";
 import { useTelemetry } from "./components/TelemetryPrivacy";
 
-const Academy = lazy(() => import("./components/Academy").then((module) => ({ default: module.Academy })));
 const SoloGame = lazy(() => import("./components/SoloGame").then((module) => ({ default: module.SoloGame })));
 const ReplayReview = lazy(() => import("./components/ReplayReview").then((module) => ({ default: module.ReplayReview })));
 const PracticeReplayReview = lazy(() => import("./components/PracticeReplayReview").then((module) => ({ default: module.PracticeReplayReview })));
@@ -58,8 +60,8 @@ type UiPhase =
   | "ROUND_RESULT"
   | "MATCH_RESULT";
 
-type HomeMode = "solo" | "academy" | "duel";
-type LocalMode = "solo" | "academy" | "replay" | "practice-replay" | null;
+type HomeMode = "solo" | "duel";
+type LocalMode = "solo" | "replay" | "practice-replay" | null;
 type MotionPreference = "system" | "full" | "reduced";
 type EffectsProfile = "full" | "lite" | "essential";
 
@@ -74,7 +76,6 @@ function readLocalModeFromLocation(): LocalMode {
   if (window.location.hash.startsWith("#/solo/practice/replay/")) return "practice-replay";
   if (window.location.hash.startsWith("#/solo/replay/")) return "replay";
   if (window.location.hash.startsWith("#/solo")) return "solo";
-  if (window.location.hash.startsWith("#/academy")) return "academy";
   return null;
 }
 
@@ -136,14 +137,14 @@ function duelInviteUrl(roomCode: string): string {
 }
 
 function readSoloLaunchModeFromLocation(): SoloGenerationMode {
-  if (window.location.hash === "#/solo/practice") return "no_guess";
+  if (window.location.hash.startsWith("#/solo/practice")) return "no_guess";
   return window.location.hash === "#/solo/no-guess"
     ? "no_guess"
     : "classic";
 }
 
 function readSoloSessionKindFromLocation(): SoloSessionKind {
-  return window.location.hash === "#/solo/practice"
+  return window.location.hash.startsWith("#/solo/practice")
     ? "GUIDED_PRACTICE"
     : "STANDARD";
 }
@@ -270,6 +271,8 @@ export function App() {
   const [soloSessionKind, setSoloSessionKind] =
     useState<SoloSessionKind>(readSoloSessionKindFromLocation);
   const [soloLaunchConfig, setSoloLaunchConfig] = useState<SoloBoardConfig | undefined>();
+  const [soloLaunchSetupComplete, setSoloLaunchSetupComplete] = useState(false);
+  const practiceLaunchContext = parsePracticeLaunchContext(window.location.hash);
   const [homeMode, setHomeMode] = useState<HomeMode>(readInitialHomeMode);
   const [connection, setConnection] = useState<ConnectionStatus>("disconnected");
   const [displayName, setDisplayName] = useState(
@@ -321,6 +324,10 @@ export function App() {
   const rttMs = realtimeRef.current.rttMs;
   const reducedMotion =
     systemReducedMotion || motionPreference === "reduced";
+  const savedSoloPreferences = useMemo(
+    () => loadSoloPreferences().preferences,
+    [localMode],
+  );
   const effectsProfile: EffectsProfile = reducedMotion
     ? "essential"
     : sessionEffects;
@@ -330,6 +337,10 @@ export function App() {
   roundRef.current = round;
   phaseRef.current = phase;
   authoritativeHashRef.current = authoritativeHash;
+
+  useEffect(() => {
+    purgeRetiredAcademyProgress();
+  }, []);
 
   useEffect(() => {
     const invitedRoomCode = readInvitedRoomCode();
@@ -1049,9 +1060,7 @@ export function App() {
     sessionKind: SoloSessionKind = "STANDARD",
   ) => {
     const hash =
-      nextMode === "academy"
-        ? "#/academy"
-        : sessionKind === "GUIDED_PRACTICE"
+      sessionKind === "GUIDED_PRACTICE"
           ? "#/solo/practice"
           : soloMode === "no_guess"
           ? "#/solo/no-guess"
@@ -1070,37 +1079,17 @@ export function App() {
   const enterSolo = (
     soloMode: SoloGenerationMode = "classic",
     sessionKind: SoloSessionKind = "STANDARD",
+    launchConfig?: SoloBoardConfig,
+    skipSetup = false,
   ) => {
     leaveRoom();
-    setSoloLaunchConfig(undefined);
+    setSoloLaunchConfig(launchConfig);
+    setSoloLaunchSetupComplete(skipSetup);
     track("mode_selected", {
       mode: sessionKind === "GUIDED_PRACTICE" ? "guided_practice" : "solo",
       source: "home",
     });
     pushLocalMode("solo", soloMode, sessionKind);
-  };
-
-  const enterAcademy = () => {
-    leaveRoom();
-    track("mode_selected", { mode: "academy", source: "home" });
-    pushLocalMode("academy");
-  };
-
-  const openSoloFromAcademy = (soloMode: SoloGenerationMode, board?: { width: number; height: number; mines: number }) => {
-    leaveRoom();
-    track("mode_selected", { mode: "solo", source: "navigation" });
-    const hash =
-      soloMode === "no_guess" ? "#/solo/no-guess" : "#/solo";
-    window.history.replaceState(
-      { hmsLocalMode: "solo", soloGenerationMode: soloMode },
-      "",
-      hash,
-    );
-    setSoloLaunchMode(soloMode);
-    setSoloSessionKind("STANDARD");
-    setSoloLaunchConfig(board ? { ...board, mode: soloMode } : undefined);
-    setLocalMode("solo");
-    window.scrollTo({ top: 0, behavior: "auto" });
   };
 
   const exitLocalMode = () => {
@@ -1186,14 +1175,12 @@ export function App() {
               ? t("status.localSolo")
               : localMode === "replay"
                 ? t("status.localReplay")
-                : localMode === "practice-replay"
-                  ? t("status.practiceReplay")
-                  : t("status.academy")
+              : t("status.practiceReplay")
             : connection === "connected"
               ? t("status.online")
               : t("status.standby")}
           <span className="divider" />
-          {localMode ? t("status.noNetwork") : formatRtt(rttMs)}
+          {localMode || !DUEL_EXPERIMENT_ENABLED ? t("status.noNetwork") : formatRtt(rttMs)}
           <LocaleToggle className="text-toggle language-toggle" />
           <button
             className="text-toggle"
@@ -1248,19 +1235,25 @@ export function App() {
           <ReplayReview recordId={readReplayRecordId()} onExit={exitLocalMode} />
         ) : localMode === "solo" ? (
           <SoloGame
-            key={`solo-${soloSessionKind}-${soloLaunchMode}-${soloLaunchConfig?.width ?? "saved"}-${soloLaunchConfig?.height ?? "saved"}-${soloLaunchConfig?.mines ?? "saved"}`}
+            key={`solo-${soloSessionKind}-${soloLaunchMode}-${practiceLaunchContext?.sourceRecordId ?? "direct"}-${soloLaunchConfig?.width ?? "saved"}-${soloLaunchConfig?.height ?? "saved"}-${soloLaunchConfig?.mines ?? "saved"}`}
             effectsProfile={effectsProfile}
             initialGenerationMode={soloLaunchMode}
             initialSessionKind={soloSessionKind}
-            {...(soloLaunchConfig ? { initialBoardConfig: soloLaunchConfig } : {})}
+            {...(practiceLaunchContext
+              ? {
+                  initialBoardConfig: {
+                    ...practiceLaunchContext.board,
+                    mode: "no_guess" as const,
+                  },
+                  initialSetupComplete: true,
+                  practiceLaunchContext,
+                }
+              : soloLaunchConfig ? {
+                  initialBoardConfig: soloLaunchConfig,
+                  initialSetupComplete: soloLaunchSetupComplete,
+                } : {})}
             reducedMotion={reducedMotion}
             onExit={exitLocalMode}
-          />
-        ) : localMode === "academy" ? (
-          <Academy
-            reducedMotion={reducedMotion}
-            onExit={exitLocalMode}
-            onOpenSolo={openSoloFromAcademy}
           />
         ) : phase === "HOME" || !DUEL_EXPERIMENT_ENABLED ? (
           <section
@@ -1280,11 +1273,7 @@ export function App() {
               <img
                 className="home-mode-board"
                 src={
-                  homeMode === "solo"
-                    ? "/hero-solo-verified-v1.svg"
-                    : homeMode === "academy"
-                      ? "/hero-academy-verified-v1.svg"
-                      : "/hero-board-h-v2.svg"
+                  homeMode === "solo" ? "/hero-solo-verified-v1.svg" : "/hero-board-h-v2.svg"
                 }
                 alt=""
                 draggable={false}
@@ -1297,13 +1286,13 @@ export function App() {
               aria-atomic="true"
             >
               <p className="eyebrow">
-                {t(homeMode === "solo" ? "home.solo.eyebrow" : homeMode === "academy" ? "home.academy.eyebrow" : "home.duel.eyebrow")}
+                {t(homeMode === "solo" ? "home.solo.eyebrow" : "home.duel.eyebrow")}
               </p>
               <h1>
-                {t(homeMode === "solo" ? "home.solo.title" : homeMode === "academy" ? "home.academy.title" : "home.duel.title")}
+                {t(homeMode === "solo" ? "home.solo.title" : "home.duel.title")}
               </h1>
               <p className="hero-description">
-                {t(homeMode === "solo" ? "home.solo.description" : homeMode === "academy" ? "home.academy.description" : "home.duel.description")}
+                {t(homeMode === "solo" ? "home.solo.description" : "home.duel.description")}
               </p>
               <div className="protocol-list" aria-label={t("home.capabilities")}>
                 {homeMode === "solo" ? (
@@ -1311,12 +1300,6 @@ export function App() {
                     <span><b>01</b> {t("home.solo.feature1")}</span>
                     <span><b>02</b> {t("home.solo.feature2")}</span>
                     <span><b>03</b> {t("home.solo.feature3")}</span>
-                  </>
-                ) : homeMode === "academy" ? (
-                  <>
-                    <span><b>01</b> {t("home.academy.feature1")}</span>
-                    <span><b>02</b> {t("home.academy.feature2")}</span>
-                    <span><b>03</b> {t("home.academy.feature3")}</span>
                   </>
                 ) : (
                   <>
@@ -1350,22 +1333,11 @@ export function App() {
                 <button
                   className="home-mode-option"
                   type="button"
-                  aria-pressed={homeMode === "academy"}
-                  disabled={busy}
-                  onClick={() => chooseHomeMode("academy")}
-                >
-                  <span>02</span>
-                  <strong>{t("home.academy")}</strong>
-                  <small>{t("home.learn")}</small>
-                </button>
-                <button
-                  className="home-mode-option"
-                  type="button"
                   aria-pressed={homeMode === "duel"}
                   disabled={busy}
                   onClick={() => chooseHomeMode("duel")}
                 >
-                  <span>03</span>
+                  <span>02</span>
                   <strong>{t("home.duel")}</strong>
                   <small>{t(DUEL_EXPERIMENT_ENABLED ? "duel.home.realtime" : "duel.home.paused")}</small>
                 </button>
@@ -1377,13 +1349,39 @@ export function App() {
               >
                 {homeMode === "solo" ? (
                   <>
-                    <button
-                      className="primary-button"
-                      type="button"
-                      onClick={() => enterSolo()}
-                    >
-                      {t("home.solo.enter")}
-                    </button>
+                    {savedSoloPreferences ? (
+                      <>
+                        <button
+                          className="primary-button"
+                          type="button"
+                          onClick={() => {
+                            enterSolo(
+                              savedSoloPreferences.config.mode,
+                              "STANDARD",
+                              savedSoloPreferences.config,
+                              true,
+                            );
+                          }}
+                        >
+                          {t("home.solo.continue")}
+                        </button>
+                        <button
+                          className="secondary-button home-reconfigure"
+                          type="button"
+                          onClick={() => enterSolo()}
+                        >
+                          {t("home.solo.reconfigure")}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => enterSolo()}
+                      >
+                        {t("home.solo.enter")}
+                      </button>
+                    )}
                     <p className="entry-mode-note">
                       {t("home.solo.note")}
                     </p>
@@ -1391,24 +1389,6 @@ export function App() {
                       <span>{t("home.solo.detail1")}</span>
                       <span>{t("home.solo.detail2")}</span>
                       <span>{t("home.solo.detail3")}</span>
-                    </div>
-                  </>
-                ) : homeMode === "academy" ? (
-                  <>
-                    <button
-                      className="primary-button"
-                      type="button"
-                      onClick={enterAcademy}
-                    >
-                      {t("home.academy.enter")}
-                    </button>
-                    <p className="entry-mode-note">
-                      {t("home.academy.note")}
-                    </p>
-                    <div className="entry-feature-list" aria-label={t("home.academyCapabilities")}>
-                      <span>{t("home.academy.detail1")}</span>
-                      <span>{t("home.academy.detail2")}</span>
-                      <span>{t("home.academy.detail3")}</span>
                     </div>
                   </>
                 ) : !DUEL_EXPERIMENT_ENABLED ? (

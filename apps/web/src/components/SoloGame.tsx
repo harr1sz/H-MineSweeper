@@ -1,10 +1,8 @@
 import {
   CELL_FLAGGED,
   calculate3BV,
-  calculate3BVPerSecond,
   calculateCPS,
   calculateGameMetrics,
-  calculateIOE,
   chordCell,
   countBoardActions,
   createBoard,
@@ -45,7 +43,6 @@ import {
   type SoloPreset,
 } from "../lib/solo";
 import {
-  SOLO_COMBO_WINDOW_MS,
   createSoloComboState,
   getSoloComboDeadlineMs,
   getSoloComboFeedbackKey,
@@ -80,6 +77,11 @@ import {
   saveSoloPreferences,
   type SoloPreferencesV1,
 } from "../lib/solo-preferences";
+import {
+  metricValuesForHistoryRecord,
+  resolveSoloMetricView,
+} from "../lib/solo-metrics";
+import type { PracticeLaunchContext } from "../lib/practice-launch";
 import { percentile } from "../lib/performance";
 import {
   activeAutoFlaggedIndexes,
@@ -117,6 +119,7 @@ import {
 } from "./CanvasBoard";
 import { SoloHistory } from "./SoloHistory";
 import { PracticeHistory } from "./PracticeHistory";
+import { ComboStatus } from "./ComboStatus";
 import { useTelemetry } from "./TelemetryPrivacy";
 import { useLocale, type MessageDescriptor } from "../i18n";
 import "./solo-game.css";
@@ -126,6 +129,8 @@ interface SoloGameProps {
   readonly initialGenerationMode?: SoloGenerationMode;
   readonly initialSessionKind?: SoloSessionKind;
   readonly initialBoardConfig?: SoloBoardConfig;
+  readonly initialSetupComplete?: boolean;
+  readonly practiceLaunchContext?: PracticeLaunchContext;
   readonly reducedMotion: boolean;
   readonly onExit: () => void;
 }
@@ -141,6 +146,7 @@ interface RecordActionOptions {
 
 export const PRACTICE_COACH_IDLE_MS = 8_000;
 export const PRACTICE_COACH_TIMEOUT_MS = 2_500;
+const GUIDED_PRACTICE_STARTED_KEY = "hms-guided-practice-started-v1";
 
 type PracticeSaveState = "IDLE" | "SAVING" | "SAVED" | "FAILED" | "TOO_LARGE";
 
@@ -408,6 +414,8 @@ export function SoloGame({
   initialGenerationMode,
   initialSessionKind = "STANDARD",
   initialBoardConfig,
+  initialSetupComplete = false,
+  practiceLaunchContext,
   reducedMotion,
   onExit,
 }: SoloGameProps) {
@@ -491,7 +499,7 @@ export function SoloGame({
   const [mode, setMode] = useState<SoloGenerationMode>(launchMode);
   const [sessionKind, setSessionKind] =
     useState<SoloSessionKind>(initialSessionKind);
-  const [setupComplete, setSetupComplete] = useState(false);
+  const [setupComplete, setSetupComplete] = useState(initialSetupComplete);
   const [status, setStatus] = useState<SoloStatus>("READY");
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
@@ -714,6 +722,15 @@ export function SoloGame({
       }),
     [],
   );
+
+  useEffect(() => {
+    if (sessionKind !== "GUIDED_PRACTICE" || !setupComplete) return;
+    try {
+      localStorage.setItem(GUIDED_PRACTICE_STARTED_KEY, "1");
+    } catch {
+      // Practice remains available when browser storage is blocked.
+    }
+  }, [sessionKind, setupComplete]);
 
   useEffect(() => {
     if (status !== "PLAYING") return;
@@ -1909,11 +1926,29 @@ export function SoloGame({
   };
 
   const chooseSessionKind = (nextSessionKind: SoloSessionKind) => {
-    const nextConfig = nextSessionKind === "GUIDED_PRACTICE"
-      ? { ...config, mode: "no_guess" as const }
+    let isFirstGuidedPractice = false;
+    if (nextSessionKind === "GUIDED_PRACTICE") {
+      try {
+        isFirstGuidedPractice = localStorage.getItem(GUIDED_PRACTICE_STARTED_KEY) === null;
+      } catch {
+        isFirstGuidedPractice = true;
+      }
+    }
+    const nextPreset = isFirstGuidedPractice ? "beginner" : preset;
+    const nextConfig: SoloBoardConfig = nextSessionKind === "GUIDED_PRACTICE"
+      ? {
+          ...(isFirstGuidedPractice ? SOLO_PRESETS.beginner : config),
+          mode: "no_guess",
+        }
       : config;
-    resetBoard(nextConfig, preset, nextSessionKind);
-    persistPreferences(nextConfig, preset);
+    if (isFirstGuidedPractice) {
+      setStatsLevel("basic");
+      setDraftWidth(String(nextConfig.width));
+      setDraftHeight(String(nextConfig.height));
+      setDraftMines(String(nextConfig.mines));
+    }
+    resetBoard(nextConfig, nextPreset, nextSessionKind);
+    persistPreferences(nextConfig, nextPreset, isFirstGuidedPractice ? "basic" : statsLevel);
   };
 
   const chooseMode = (nextMode: SoloGenerationMode) => {
@@ -2030,12 +2065,14 @@ export function SoloGame({
       : actionBreakdown.physicalClicks,
     elapsedMs,
   );
-  const threeBvPerSecond =
-    board3BV === null ? null : calculate3BVPerSecond(board3BV, elapsedMs);
-  const ioe =
-    board3BV === null
-      ? null
-      : calculateIOE(board3BV, actionBreakdown.physicalClicks);
+  const metricView = resolveSoloMetricView({
+    sessionKind,
+    status,
+    board3BV,
+    elapsedMs,
+    physicalClicks: actionBreakdown.physicalClicks,
+  });
+  const { threeBvPerSecond, ioe } = metricView;
   const currentRunId = runIdentityRef.current?.runId ?? "";
   const currentHistoryPending = sessionKind === "STANDARD" &&
     getPendingHistoryWrites().some(
@@ -2214,6 +2251,7 @@ export function SoloGame({
       actions: actionTraceRef.current,
     });
     const actions = countBoardActions(actionTraceRef.current);
+    const completionMetrics = metricValuesForHistoryRecord(status, metrics);
     const boardSpec = boardSpecRef.current;
     if (boardSpec === null) return;
     let replayActions = [...replayActionTraceRef.current];
@@ -2280,8 +2318,8 @@ export function SoloGame({
         elapsedMs: metrics.elapsedMs,
         board3BV: metrics.board3BV,
         cps: metrics.cps,
-        threeBvPerSecond: metrics.threeBvPerSecond,
-        ioe: metrics.ioe,
+        threeBvPerSecond: completionMetrics.threeBvPerSecond,
+        ioe: completionMetrics.ioe,
         physicalClicks: metrics.physicalClicks,
         semanticActions: metrics.semanticActions,
         acceptedActions: metrics.acceptedActions,
@@ -2582,54 +2620,6 @@ export function SoloGame({
                 <small>5–100 / ≤10K</small>
               </button>
             </div>
-            <div className={`solo-custom-grid${preset === "custom" ? " is-enabled" : ""}`}>
-              <label>
-                <span>{t("solo.width")}</span>
-                <input
-                  aria-label={t("solo.customWidth")}
-                  inputMode="numeric"
-                  max="100"
-                  min="5"
-                  type="number"
-                  disabled={preset !== "custom"}
-                  value={draftWidth}
-                  onChange={(event) => setDraftWidth(event.target.value)}
-                />
-              </label>
-              <label>
-                <span>{t("solo.height")}</span>
-                <input
-                  aria-label={t("solo.customHeight")}
-                  inputMode="numeric"
-                  max="100"
-                  min="5"
-                  type="number"
-                  disabled={preset !== "custom"}
-                  value={draftHeight}
-                  onChange={(event) => setDraftHeight(event.target.value)}
-                />
-              </label>
-              <label>
-                <span>{t("solo.mines")}</span>
-                <input
-                  aria-label={t("solo.customMines")}
-                  inputMode="numeric"
-                  min="1"
-                  type="number"
-                  disabled={preset !== "custom"}
-                  value={draftMines}
-                  onChange={(event) => setDraftMines(event.target.value)}
-                />
-              </label>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={preset !== "custom"}
-                onClick={applyCustom}
-              >
-                {t("solo.validateCustom")}
-              </button>
-            </div>
           </div>
 
           <div className="solo-setup-section">
@@ -2658,7 +2648,51 @@ export function SoloGame({
             </div>
           </div>
 
-          <div className="solo-setup-section solo-setup-section-split">
+          <details className="solo-setup-advanced" open={preset === "custom" ? true : undefined}>
+            <summary>{t("solo.advancedSettings")}</summary>
+            {preset === "custom" && (
+              <div className="solo-custom-grid is-enabled">
+                <label>
+                  <span>{t("solo.width")}</span>
+                  <input
+                    aria-label={t("solo.customWidth")}
+                    inputMode="numeric"
+                    max="100"
+                    min="5"
+                    type="number"
+                    value={draftWidth}
+                    onChange={(event) => setDraftWidth(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>{t("solo.height")}</span>
+                  <input
+                    aria-label={t("solo.customHeight")}
+                    inputMode="numeric"
+                    max="100"
+                    min="5"
+                    type="number"
+                    value={draftHeight}
+                    onChange={(event) => setDraftHeight(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>{t("solo.mines")}</span>
+                  <input
+                    aria-label={t("solo.customMines")}
+                    inputMode="numeric"
+                    min="1"
+                    type="number"
+                    value={draftMines}
+                    onChange={(event) => setDraftMines(event.target.value)}
+                  />
+                </label>
+                <button className="secondary-button" type="button" onClick={applyCustom}>
+                  {t("solo.validateCustom")}
+                </button>
+              </div>
+            )}
+            <div className="solo-setup-section solo-setup-section-split">
             <div>
               <div className="solo-setup-heading">
                 <span>04</span>
@@ -2715,7 +2749,8 @@ export function SoloGame({
                 ))}
               </div>
             </div>
-          </div>
+            </div>
+          </details>
 
           <div className="solo-setup-launch">
             <div>
@@ -2765,7 +2800,16 @@ export function SoloGame({
             {t(config.mode === "no_guess" ? "solo.noGuess" : "solo.classic")}
           </p>
           {sessionKind === "GUIDED_PRACTICE" && (
-            <span className="practice-not-scored">{t("practice.notScored")}</span>
+            <>
+              <span className="practice-not-scored">{t("practice.notScored")}</span>
+              {practiceLaunchContext && (
+                <p className="practice-launch-context">
+                  {t(`practice.launch.${practiceLaunchContext.errorCategory}`, {
+                    step: practiceLaunchContext.replayStep,
+                  })}
+                </p>
+              )}
+            </>
           )}
         </div>
         <button className="secondary-button solo-exit" type="button" onClick={returnToSetup}>
@@ -2787,6 +2831,13 @@ export function SoloGame({
             {sessionKind === "GUIDED_PRACTICE" && (
               <span>{t("practice.notScored")}</span>
             )}
+            <ComboStatus
+              count={comboState.count}
+              tier={comboTier}
+              label={t("solo.flowCombo")}
+              message={t(getSoloComboFeedbackKey(comboState.count))}
+              lastIncrementAtMs={comboState.lastIncrementAtMs}
+            />
           </div>
           <CanvasBoard
             {...(actionVisual === undefined ? {} : { actionVisual })}
@@ -2811,25 +2862,6 @@ export function SoloGame({
               }
             }}
           />
-
-          {comboTier > 0 && (
-            <div
-              key={comboState.count}
-              className={`flow-combo combo-${comboTier}`}
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              <span>{t("solo.flowCombo")}</span>
-              <strong>×{comboState.count}</strong>
-              <em>{t(getSoloComboFeedbackKey(comboState.count))}</em>
-              <div className="flow-combo-progress" aria-hidden="true">
-                <div
-                  key={`${comboState.count}-${comboState.lastIncrementAtMs}`}
-                  style={{ animationDuration: `${SOLO_COMBO_WINDOW_MS}ms` }}
-                />
-              </div>
-            </div>
-          )}
 
           {status === "GENERATING" && (
             <div className="solo-generating" aria-live="assertive">
@@ -2868,8 +2900,10 @@ export function SoloGame({
                   </span>
                 )}
               </div>
-              {displayedCoachSuggestion?.proof && displayedCoachSuggestion.cellIndex !== undefined && (
-                <dl className="practice-coach-proof">
+              {status !== "READY" && (
+                <>
+                  {displayedCoachSuggestion?.proof && displayedCoachSuggestion.cellIndex !== undefined && (
+                    <dl className="practice-coach-proof">
                   <div>
                     <dt>{t("practice.coach.target")}</dt>
                     <dd>{practiceCoordinate(displayedCoachSuggestion.cellIndex)}</dd>
@@ -2890,38 +2924,40 @@ export function SoloGame({
                     <dt>{t("practice.coach.proof")}</dt>
                     <dd>{practiceProofDescription(displayedCoachSuggestion.proof)}</dd>
                   </div>
-                </dl>
+                    </dl>
+                  )}
+                  <div className="practice-coach-actions">
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
+                      onClick={requestImmediateHint}
+                    >
+                      {t("practice.coach.hintNow")}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
+                      onClick={demonstrateNextStep}
+                    >
+                      {t("practice.coach.demonstrate")}
+                    </button>
+                  </div>
+                  <label className="practice-auto-mark">
+                    <input
+                      type="checkbox"
+                      checked={autoMarkMines}
+                      disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
+                      onChange={toggleAutoMarkMines}
+                    />
+                    <span>
+                      <strong>{t("practice.coach.autoMark")}</strong>
+                      <small>{t("practice.coach.autoMarkHelp")}</small>
+                    </span>
+                  </label>
+                </>
               )}
-              <div className="practice-coach-actions">
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
-                  onClick={requestImmediateHint}
-                >
-                  {t("practice.coach.hintNow")}
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
-                  onClick={demonstrateNextStep}
-                >
-                  {t("practice.coach.demonstrate")}
-                </button>
-              </div>
-              <label className="practice-auto-mark">
-                <input
-                  type="checkbox"
-                  checked={autoMarkMines}
-                  disabled={status === "GENERATING" || status === "WON" || status === "LOST"}
-                  onChange={toggleAutoMarkMines}
-                />
-                <span>
-                  <strong>{t("practice.coach.autoMark")}</strong>
-                  <small>{t("practice.coach.autoMarkHelp")}</small>
-                </span>
-              </label>
             </section>
           )}
           {(status === "WON" || status === "LOST") && (
@@ -2941,6 +2977,7 @@ export function SoloGame({
                   <b>3BV {board3BV ?? "—"}</b>
                   <b>3BV/s {formatMetric(threeBvPerSecond)}</b>
                   <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
+                  {status === "LOST" && <small>{t("solo.completionMetricUnavailable")}</small>}
                 </div>
               )}
               <div className="solo-terminal-legend" aria-label={t("solo.legend.aria")}>
@@ -2993,8 +3030,10 @@ export function SoloGame({
               <strong>{progress}%</strong>
             </div>
             <div>
-              <span>{t("solo.actions")}</span>
-              <strong>{actionBreakdown.semanticActions}</strong>
+              <span>{status === "WON" || status === "LOST"
+                ? t("solo.finalCps")
+                : t("solo.currentCps")}</span>
+              <strong>{formatMetric(cps)}</strong>
             </div>
             <div>
               <span>{t("solo.board")}</span>
@@ -3026,29 +3065,31 @@ export function SoloGame({
 
           {sessionKind === "STANDARD" && statsLevel !== "basic" && (
             <div className="solo-stats solo-stats-advanced">
-              <div>
-                <span>{coarsePointer ? t("solo.actionsPerSecond") : "CPS / Cl/s"}</span>
-                <strong>{formatMetric(cps)}</strong>
-              </div>
-              <div>
+              <div title={t("solo.board3bvHelp")}>
                 <span>3BV</span>
                 <strong>{board3BV ?? "—"}</strong>
               </div>
-              <div>
+              <div title={t("solo.metricHelp")}>
                 <span>3BV/s</span>
-                <strong>{formatMetric(threeBvPerSecond)}</strong>
+                <strong>{metricView.completionState === "PENDING"
+                  ? t("solo.completionMetricPending")
+                  : formatMetric(threeBvPerSecond)}</strong>
               </div>
-              <div>
-                <span>{status === "WON" ? "IOE" : t("solo.ioeProgress")}</span>
+              <div title={t("solo.metricHelp")}>
+                <span>IOE</span>
                 <strong>
-                  {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}
+                  {metricView.completionState === "PENDING"
+                    ? t("solo.completionMetricPending")
+                    : ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}
                 </strong>
               </div>
             </div>
           )}
 
           {statsLevel === "analysis" && (
-            <div className="solo-analysis" aria-label={t("solo.actionAnalysis")}>
+            <details className="solo-analysis" open={status === "WON" || status === "LOST"}>
+              <summary>{t("solo.actionDetails")}</summary>
+              <div aria-label={t("solo.actionAnalysis")}>
               <span>
                 {t("solo.physicalClicks")} <b>{actionBreakdown.physicalClicks}</b>
               </span>
@@ -3064,7 +3105,8 @@ export function SoloGame({
               <span>
                 {t("solo.flagUnflag")} <b>{actionBreakdown.flags} / {actionBreakdown.unflags}</b>
               </span>
-            </div>
+              </div>
+            </details>
           )}
 
           <div className="solo-progress-track">

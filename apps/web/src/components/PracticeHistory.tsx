@@ -150,23 +150,25 @@ export function PracticeHistory({ store, refreshToken }: PracticeHistoryProps) {
             }}
           />
         </label>
-        <button
-          className="secondary-button"
-          type="button"
-          disabled={!snapshot || snapshot.recordCount === 0}
-          onClick={() => void exportHistory()}
-        >
-          {t("practice.history.export")}
-        </button>
-        <button
-          className="secondary-button practice-history-delete"
-          type="button"
-          disabled={!snapshot || snapshot.recordCount === 0}
-          onClick={() => void clearHistory()}
-          onBlur={() => setConfirmingClear(false)}
-        >
-          {t(confirmingClear ? "practice.history.clearConfirmButton" : "practice.history.clear")}
-        </button>
+        {snapshot && snapshot.recordCount > 0 && (
+          <>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void exportHistory()}
+            >
+              {t("practice.history.export")}
+            </button>
+            <button
+              className="secondary-button practice-history-delete"
+              type="button"
+              onClick={() => void clearHistory()}
+              onBlur={() => setConfirmingClear(false)}
+            >
+              {t(confirmingClear ? "practice.history.clearConfirmButton" : "practice.history.clear")}
+            </button>
+          </>
+        )}
       </div>
 
       {message && (
