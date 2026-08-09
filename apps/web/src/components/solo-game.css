@@ -485,7 +485,7 @@
 }
 
 .solo-theme-tabs {
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .solo-compact-tabs button {
@@ -494,7 +494,7 @@
   background: #0a0a0c;
   color: var(--muted);
   cursor: pointer;
-  font: 650 8px var(--mono);
+  font: 650 10px var(--mono);
   padding: 4px;
   transition:
     border-color 120ms ease,
@@ -507,12 +507,31 @@
   border-left: 0;
 }
 
-.solo-theme-tabs button:nth-child(odd) {
-  border-left-width: 1px;
+.solo-theme-tabs button {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 7px 9px;
+  text-align: left;
 }
 
-.solo-theme-tabs button:nth-child(n + 3) {
-  border-top-width: 0;
+.solo-theme-tabs button > span:last-child {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.solo-theme-swatch {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border: 1px solid;
+  font: 800 13px var(--mono);
+  text-shadow: 0 1px 1px rgb(0 0 0 / 65%);
 }
 
 .solo-compact-tabs button:hover,
@@ -866,6 +885,18 @@
 
   .solo-setup-launch {
     grid-template-columns: 1fr;
+  }
+
+  .solo-theme-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .solo-theme-tabs button:nth-child(odd) {
+    border-left-width: 1px;
+  }
+
+  .solo-theme-tabs button:nth-child(n + 3) {
+    border-top-width: 0;
   }
 }
 

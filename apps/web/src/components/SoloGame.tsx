@@ -111,6 +111,7 @@ import {
 } from "../lib/practice-history";
 import {
   CanvasBoard,
+  resolveBoardPalette,
   type BoardAction,
   type BoardActionVisual,
   type BoardEffectsProfile,
@@ -2849,22 +2850,36 @@ export function SoloGame({
                 <div className="solo-compact-tabs solo-theme-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
                   {(
                     [
-                      ["black-gold", t("solo.comfort")],
                       ["classic", t("solo.professional")],
+                      ["black-gold", t("solo.comfort")],
                       ["high-contrast", t("solo.highContrast")],
                       ["ivory-tactical", t("solo.ivoryTactical")],
                     ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      className={boardTheme === value ? "is-active" : ""}
-                      key={value}
-                      type="button"
-                      aria-pressed={boardTheme === value}
-                      onClick={() => chooseBoardTheme(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  ).map(([value, label]) => {
+                    const palette = resolveBoardPalette(value);
+                    return (
+                      <button
+                        className={boardTheme === value ? "is-active" : ""}
+                        key={value}
+                        type="button"
+                        aria-pressed={boardTheme === value}
+                        onClick={() => chooseBoardTheme(value)}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="solo-theme-swatch"
+                          style={{
+                            background: `linear-gradient(135deg, ${palette.hiddenA} 0 50%, ${palette.revealed} 50% 100%)`,
+                            borderColor: palette.revealedLine,
+                            color: palette.numberColors[1],
+                          }}
+                        >
+                          1
+                        </span>
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
