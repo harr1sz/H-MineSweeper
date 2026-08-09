@@ -42,6 +42,25 @@ function recordingContext(): {
   return { context, operations };
 }
 
+function relativeLuminance(hex: string): number {
+  const channels = hex.match(/[a-f\d]{2}/giu)?.map((channel) => {
+    const value = Number.parseInt(channel, 16) / 255;
+    return value <= 0.04045
+      ? value / 12.92
+      : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  if (!channels || channels.length !== 3) {
+    throw new Error(`无法计算颜色亮度：${hex}`);
+  }
+  return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+}
+
+function contrastRatio(first: string, second: string): number {
+  const brighter = Math.max(relativeLuminance(first), relativeLuminance(second));
+  const darker = Math.min(relativeLuminance(first), relativeLuminance(second));
+  return (brighter + 0.05) / (darker + 0.05);
+}
+
 describe("CanvasBoard rendering helpers", () => {
   it("normalizes authoritative changed indexes without reordering them", () => {
     expect(
@@ -73,6 +92,18 @@ describe("CanvasBoard rendering helpers", () => {
       expect(palette.numberStroke).not.toBe(palette.numberColors[1]);
       expect(palette.numberColors).toHaveLength(9);
       expect(palette.numberColors.slice(1).every(Boolean)).toBe(true);
+    }
+  });
+
+  it("keeps revealed cells visually distinct from both covered-cell shades", () => {
+    for (const theme of [
+      "classic",
+      "black-gold",
+      "high-contrast",
+    ] as const) {
+      const palette = resolveBoardPalette(theme);
+      expect(contrastRatio(palette.revealed, palette.hiddenA)).toBeGreaterThanOrEqual(2.2);
+      expect(contrastRatio(palette.revealed, palette.hiddenB)).toBeGreaterThanOrEqual(2.2);
     }
   });
 

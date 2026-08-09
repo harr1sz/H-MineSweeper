@@ -496,6 +496,39 @@ test("guided practice stays score-isolated and saves a verified practice replay"
   await expect(page.getByText(/已检查 \d+ 步/u)).toBeVisible();
 });
 
+test("练习模式踩雷后可以回到踩雷前一步并继续同一张棋盘", async ({ page }) => {
+  await useDeterministicPracticeEnvironment(page);
+  await enterClassicGuidedPractice(page);
+  const mineIndex = fixedBoard().mines.findIndex((value) => value === 1);
+
+  await clickBoardCell(page, FIRST_INDEX);
+  await clickBoardCell(page, mineIndex);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
+  const firstBoardHash = await page.locator(".solo-proof code").textContent();
+  await expect(readPracticeStoreSnapshot(page)).resolves.toMatchObject({
+    runCount: 1,
+    replayCount: 1,
+  });
+
+  await page
+    .getByRole("button", { name: "回到踩雷前一步", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toHaveCount(0);
+  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
+  await expect(page.getByText("已回到踩雷前一步，可以换一种走法。")).toBeVisible();
+  await expect(page.locator(".solo-proof code")).toHaveText(firstBoardHash ?? "");
+  await expect(page.getByRole("button", { name: "立即提示" })).toBeEnabled();
+
+  await clickBoardCell(page, mineIndex);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
+  await expect(readPracticeStoreSnapshot(page)).resolves.toMatchObject({
+    runCount: 2,
+    replayCount: 2,
+  });
+});
+
 test("a practice terminal leaves existing standard history, PB, and trend input unchanged", async ({
   page,
 }) => {

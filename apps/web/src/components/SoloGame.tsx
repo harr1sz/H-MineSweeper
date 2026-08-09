@@ -142,6 +142,17 @@ interface RecordActionOptions {
   readonly physicalClicks?: number;
   readonly comboActor?: SoloComboActor;
   readonly actionAt?: number;
+  readonly replayElapsedMs?: number;
+}
+
+interface PracticePreMineSnapshot {
+  readonly game: GameState;
+  readonly actionCount: number;
+  readonly practiceEventCount: number;
+  readonly practiceEventsOverflow: boolean;
+  readonly lastReplayStateHash: string;
+  readonly elapsedMs: number;
+  readonly effectiveInteractionMs: number;
 }
 
 export const PRACTICE_COACH_IDLE_MS = 8_000;
@@ -394,6 +405,15 @@ function applyFlagsByIndex(
   }
 }
 
+function cloneGameState(state: GameState): GameState {
+  return {
+    board: state.board,
+    visibility: new Uint8Array(state.visibility),
+    revealedSafeCount: state.revealedSafeCount,
+    outcome: state.outcome,
+  };
+}
+
 function classifyHistoryFailure(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (
@@ -471,6 +491,7 @@ export function SoloGame({
   const practiceStartedAtRef = useRef<number | null>(null);
   const practiceSavedRunRef = useRef("");
   const practiceUsedAutoMarkRef = useRef(false);
+  const practicePreMineSnapshotRef = useRef<PracticePreMineSnapshot | null>(null);
   const autoMarkMinesRef = useRef(false);
   const visualSequenceRef = useRef(0);
   const comboStateRef = useRef(createSoloComboState());
@@ -785,6 +806,7 @@ export function SoloGame({
       practiceStartedAtRef.current = null;
       practiceSavedRunRef.current = "";
       practiceUsedAutoMarkRef.current = false;
+      practicePreMineSnapshotRef.current = null;
       practiceManualHintPendingRef.current = false;
       practiceLastInteractionAtRef.current = null;
       practiceShownStateHashesRef.current.clear();
@@ -933,8 +955,8 @@ export function SoloGame({
       } else if (replayActionTraceRef.current.length < SOLO_REPLAY_MAX_ACTIONS) {
         replayActionTraceRef.current.push({
           seq: replayActionTraceRef.current.length + 1,
-          elapsedMs:
-            startedAt === null ? 0 : Math.max(0, actionAt - startedAt),
+          elapsedMs: options.replayElapsedMs ??
+            (startedAt === null ? 0 : Math.max(0, actionAt - startedAt)),
           actionType,
           cellIndex: originIndex,
           physicalClicks,
@@ -1057,6 +1079,7 @@ export function SoloGame({
           physicalClicks: options.physicalClicks ?? 1,
           comboActor: "PLAYER",
           actionAt: beganAt,
+          replayElapsedMs: 0,
         },
       );
       return next.outcome;
@@ -1342,6 +1365,17 @@ export function SoloGame({
       }
 
       const actionAt = performance.now();
+      const practicePreActionSnapshot = sessionKind === "GUIDED_PRACTICE"
+        ? {
+            game: cloneGameState(current),
+            actionCount: actionTraceRef.current.length,
+            practiceEventCount: practiceEventsRef.current.length,
+            practiceEventsOverflow: practiceEventsOverflowRef.current,
+            lastReplayStateHash: lastReplayStateHashRef.current,
+            elapsedMs: startedAt === null ? 0 : Math.max(0, actionAt - startedAt),
+            effectiveInteractionMs: effectiveInteractionAccumulatedMsRef.current,
+          } satisfies PracticePreMineSnapshot
+        : null;
       recordEffectiveInteraction(actionAt);
       if (sessionKind === "GUIDED_PRACTICE") {
         practiceLastInteractionAtRef.current = actionAt;
@@ -1378,6 +1412,9 @@ export function SoloGame({
             ? toggleFlag(current, cellIndex)
             : chordCell(current, cellIndex);
       const postStateHash = hashGameState(current);
+      if (delta.hitMine === true && practicePreActionSnapshot !== null) {
+        practicePreMineSnapshotRef.current = practicePreActionSnapshot;
+      }
       recordAction(
         action,
         cellIndex,
@@ -1447,6 +1484,7 @@ export function SoloGame({
       replaceGame,
       resolvePracticeActionFeedback,
       sessionKind,
+      startedAt,
       status,
     ],
   );
@@ -2056,6 +2094,79 @@ export function SoloGame({
     }
   }, []);
 
+  const replaySameBoard = () => {
+    const currentSpec = boardSpecRef.current;
+    if (
+      sessionKind !== "STANDARD" ||
+      (status !== "WON" && status !== "LOST") ||
+      currentSpec === null
+    ) {
+      return;
+    }
+    const replaySpec = Object.freeze({ ...currentSpec });
+    resetBoard(config, preset, "STANDARD");
+    beginGame(replaySpec, replaySpec.startIndex, []);
+    setNotice({ id: "solo.sameBoardStarted" });
+  };
+
+  const rewindPracticeBeforeMine = () => {
+    const snapshot = practicePreMineSnapshotRef.current;
+    if (
+      sessionKind !== "GUIDED_PRACTICE" ||
+      status !== "LOST" ||
+      practiceSaveState === "SAVING" ||
+      snapshot === null
+    ) {
+      return;
+    }
+    cancelGeneration();
+    cancelCoachAnalysis();
+    cancelCoachFeedbackAnalysis();
+    const now = performance.now();
+    const rebasedStartedAt = now - snapshot.elapsedMs;
+    const restoredGame = cloneGameState(snapshot.game);
+    actionTraceRef.current = actionTraceRef.current.slice(0, snapshot.actionCount);
+    practiceEventsRef.current = practiceEventsRef.current.slice(
+      0,
+      snapshot.practiceEventCount,
+    );
+    practiceEventsOverflowRef.current = snapshot.practiceEventsOverflow;
+    lastReplayStateHashRef.current = snapshot.lastReplayStateHash;
+    practiceStartedAtRef.current = rebasedStartedAt;
+    practiceLastInteractionAtRef.current = now;
+    practiceManualHintPendingRef.current = false;
+    practiceShownStateHashesRef.current.clear();
+    practiceAutoMarkEvidenceHashRef.current = null;
+    practiceAutoMarkExplanationRef.current = false;
+    practiceSavedRunRef.current = "";
+    practicePreMineSnapshotRef.current = null;
+    runIdentityRef.current = {
+      runId: globalThis.crypto.randomUUID(),
+      trainingSessionId: globalThis.crypto.randomUUID(),
+    };
+    runCompletedAtRef.current = null;
+    historyEnqueuedRunRef.current = "";
+    effectiveInteractionAccumulatedMsRef.current = snapshot.effectiveInteractionMs;
+    lastEffectiveInteractionAtRef.current = now;
+    runEffectiveInteractionMsRef.current = 0;
+    setStartedAt(rebasedStartedAt);
+    setFinishedAt(null);
+    setClockNow(now);
+    setStatus("PLAYING");
+    setActionBreakdown(countBoardActions(actionTraceRef.current));
+    setActionVisual(undefined);
+    clearCombo();
+    setCurrentCoachAnalysis(null);
+    setDisplayedCoachSuggestion(null);
+    setCoachTransportError(false);
+    setCoachIdleSeconds(8);
+    setPracticeSaveState("IDLE");
+    setShowPracticeHistory(false);
+    setTerminalDetonatedIndex(undefined);
+    replaceGame(restoredGame);
+    setNotice({ id: "practice.result.rewindNotice" });
+  };
+
   const flags = countFlags(game);
   const elapsedMs =
     startedAt === null ? 0 : (finishedAt ?? clockNow) - startedAt;
@@ -2074,6 +2185,8 @@ export function SoloGame({
   });
   const { threeBvPerSecond, ioe } = metricView;
   const currentRunId = runIdentityRef.current?.runId ?? "";
+  const canRewindPractice = sessionKind === "GUIDED_PRACTICE" &&
+    status === "LOST" && practicePreMineSnapshotRef.current !== null;
   const currentHistoryPending = sessionKind === "STANDARD" &&
     getPendingHistoryWrites().some(
       ({ record }) => record.recordId === currentRunId,
@@ -2987,13 +3100,22 @@ export function SoloGame({
                 <span>{t("solo.legend.wrongFlag")}</span>
               </div>
               <div className="result-actions">
+                {canRewindPractice && practiceSaveState !== "SAVING" && (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={rewindPracticeBeforeMine}
+                  >
+                    {t("practice.result.rewind")}
+                  </button>
+                )}
                 {sessionKind === "GUIDED_PRACTICE" ? (
                   practiceSaveState === "SAVING" ? (
                     <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
                   ) : practiceSaveState === "SAVED" ? (
-                    <a className="primary-button" href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("practice.result.reviewReplay")}</a>
+                    <a className={canRewindPractice ? "secondary-button" : "primary-button"} href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("practice.result.reviewReplay")}</a>
                   ) : (
-                    <button className="primary-button" type="button" onClick={reviewFinalBoard}>{t("practice.result.reviewBoard")}</button>
+                    <button className={canRewindPractice ? "secondary-button" : "primary-button"} type="button" onClick={reviewFinalBoard}>{t("practice.result.reviewBoard")}</button>
                   )
                 ) : currentHistoryPending ? (
                   <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
@@ -3005,6 +3127,9 @@ export function SoloGame({
                 )}
                 {sessionKind === "GUIDED_PRACTICE" && practiceSaveState !== "SAVING" && (
                   <button className="secondary-button" type="button" onClick={openPracticeHistory}>{t("practice.result.history")}</button>
+                )}
+                {sessionKind === "STANDARD" && (
+                  <button className="secondary-button" type="button" onClick={replaySameBoard}>{t("solo.replaySameBoard")}</button>
                 )}
                 {sessionKind === "STANDARD" && (
                   <button className="secondary-button" type="button" onClick={() => resetBoard()}>{t("solo.sameBoard")}</button>

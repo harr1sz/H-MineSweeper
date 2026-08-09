@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   getNeighborIndices,
   type VisibleAnalysisStatus,
@@ -111,8 +111,12 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
   const [timelineExpanded, setTimelineExpanded] = useState(false);
   const [showTerminalTruth, setShowTerminalTruth] = useState(false);
   const [focusedSuggestion, setFocusedSuggestion] = useState<number | null>(null);
+  const pendingViewportRef = useRef<{ x: number; y: number } | null>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceMinHeight, setWorkspaceMinHeight] = useState(0);
 
   useEffect(() => {
+    setWorkspaceMinHeight(0);
     let active = true;
     let worker: Worker | null = null;
     void Promise.all([store.read(), store.readReplay(recordId)]).then(([history, loadedReplay]) => {
@@ -254,10 +258,47 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
     };
   }, [cellsBefore, focusedSuggestion, record, replay, result, selectedAction, selectedExplanation, selectedSeq, showAfter, showTerminalTruth, visibleSuggestions]);
 
+  useLayoutEffect(() => {
+    const pending = pendingViewportRef.current;
+    if (pending === null) return;
+    window.scrollTo(pending.x, pending.y);
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo(pending.x, pending.y);
+      if (pendingViewportRef.current === pending) {
+        pendingViewportRef.current = null;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedSuggestion, selectedSeq, showAfter, showTerminalTruth, timelineExpanded]);
+
+  useLayoutEffect(() => {
+    const workspace = workspaceRef.current;
+    if (workspace === null) return;
+    const measuredHeight = Math.ceil(workspace.getBoundingClientRect().height);
+    setWorkspaceMinHeight((current) => Math.max(current, measuredHeight));
+  });
+
+  const captureViewportBeforeFocus = () => {
+    pendingViewportRef.current ??= { x: window.scrollX, y: window.scrollY };
+  };
+
+  const keepViewportStable = (update: () => void) => {
+    captureViewportBeforeFocus();
+    const pending = pendingViewportRef.current!;
+    update();
+    window.requestAnimationFrame(() => {
+      if (pendingViewportRef.current !== pending) return;
+      window.scrollTo(pending.x, pending.y);
+      pendingViewportRef.current = null;
+    });
+  };
+
   const selectStep = (index: number) => {
-    setSelectedSeq(Math.max(0, Math.min((result?.steps.length ?? 1) - 1, index)));
-    setShowAfter(false);
-    setFocusedSuggestion(null);
+    keepViewportStable(() => {
+      setSelectedSeq(Math.max(0, Math.min((result?.steps.length ?? 1) - 1, index)));
+      setShowAfter(false);
+      setFocusedSuggestion(null);
+    });
   };
 
   const coordinateText = (cellIndex: number) => {
@@ -327,7 +368,8 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
           type="button"
           key={`${suggestion.action}-${suggestion.cellIndex}`}
           aria-pressed={focusedSuggestion === suggestion.cellIndex}
-          onClick={() => setFocusedSuggestion(suggestion.cellIndex)}
+          onPointerDown={captureViewportBeforeFocus}
+          onClick={() => keepViewportStable(() => setFocusedSuggestion(suggestion.cellIndex))}
         >
           <b>{visibleSuggestions.findIndex(({ cellIndex, action: visibleAction }) => cellIndex === suggestion.cellIndex && visibleAction === suggestion.action) + 1}</b>
           {t(action === "FLAG" ? "replay.suggestion.flag" : action === "UNFLAG_THEN_REVEAL" ? "replay.suggestion.unflagReveal" : "replay.suggestion.reveal", {
@@ -351,7 +393,11 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
     {result && <>
       <div className="replay-review-summary">{t("replay.verifiedHuman", { count: result.steps.length })}</div>
       {record?.replay.status === "TRUNCATED" && <div className="replay-review-status" role="status">{t("replay.truncated")}</div>}
-      {record && boardState && selectedExplanation && selectedAction && <div className="replay-workspace">
+      {record && boardState && selectedExplanation && selectedAction && <div
+        className="replay-workspace"
+        ref={workspaceRef}
+        style={workspaceMinHeight > 0 ? { minHeight: `${workspaceMinHeight}px` } : undefined}
+      >
         <div>
           <ReplayBoard width={record.board.spec.width} height={record.board.spec.height} state={boardState} />
           <div className="replay-legend" aria-label={t("replay.legendAria")}>
@@ -389,19 +435,19 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
         </aside>
       </div>}
       <div className="replay-controls">
-        <button type="button" onClick={() => selectStep(selectedSeq - 1)} disabled={selectedSeq === 0}>{t("replay.prev")}</button>
-        <button type="button" onClick={() => selectStep(selectedSeq + 1)} disabled={selectedSeq >= result.steps.length - 1}>{t("replay.next")}</button>
-        <button type="button" onClick={() => selectStep((moments.filter((moment) => moment.index < selectedSeq).at(-1)?.index) ?? 0)}>{t("replay.prevKey")}</button>
-        <button type="button" onClick={() => selectStep((moments.find((moment) => moment.index > selectedSeq)?.index) ?? result.steps.length - 1)}>{t("replay.nextKey")}</button>
-        <button type="button" onClick={() => setShowAfter((value) => !value)}>{t(showAfter ? "replay.showBefore" : "replay.showAfter")}</button>
-        <button type="button" aria-pressed={showTerminalTruth} onClick={() => setShowTerminalTruth((value) => !value)}>{t(showTerminalTruth ? "replay.hideTruth" : "replay.showTruth")}</button>
-        <button type="button" onClick={() => setTimelineExpanded((value) => !value)}>{t(timelineExpanded ? "replay.collapseTimeline" : "replay.expandTimeline")}</button>
+        <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => selectStep(selectedSeq - 1)} disabled={selectedSeq === 0}>{t("replay.prev")}</button>
+        <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => selectStep(selectedSeq + 1)} disabled={selectedSeq >= result.steps.length - 1}>{t("replay.next")}</button>
+        <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => selectStep((moments.filter((moment) => moment.index < selectedSeq).at(-1)?.index) ?? 0)}>{t("replay.prevKey")}</button>
+        <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => selectStep((moments.find((moment) => moment.index > selectedSeq)?.index) ?? result.steps.length - 1)}>{t("replay.nextKey")}</button>
+        <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => keepViewportStable(() => setShowAfter((value) => !value))}>{t(showAfter ? "replay.showBefore" : "replay.showAfter")}</button>
+        <button type="button" aria-pressed={showTerminalTruth} onPointerDown={captureViewportBeforeFocus} onClick={() => keepViewportStable(() => setShowTerminalTruth((value) => !value))}>{t(showTerminalTruth ? "replay.hideTruth" : "replay.showTruth")}</button>
+        <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => keepViewportStable(() => setTimelineExpanded((value) => !value))}>{t(timelineExpanded ? "replay.collapseTimeline" : "replay.expandTimeline")}</button>
       </div>
       {timelineExpanded && <ol className="replay-timeline">{result.steps.map((step, index) => {
         const action = replay?.actions[index];
         const explanation = explanations[index];
         if (!action || !explanation) return null;
-        return <li key={step.seq}><button type="button" className={index === selectedSeq ? "is-active" : ""} onClick={() => selectStep(index)}>
+        return <li key={step.seq}><button type="button" className={index === selectedSeq ? "is-active" : ""} onPointerDown={captureViewportBeforeFocus} onClick={() => selectStep(index)}>
           {t("replay.timelineSummary", {
             step: step.seq,
             action: actionText(action, index),
@@ -417,7 +463,7 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
             <h3>{t(VERDICT_MESSAGE_IDS[moment.explanation.verdict])}</h3>
             <p>{actionText(moment.action, moment.index)}</p>
             <div className="replay-moment-actions">
-              <button type="button" onClick={() => selectStep(moment.index)}>{t("replay.reviewThisStep")}</button>
+              <button type="button" onPointerDown={captureViewportBeforeFocus} onClick={() => selectStep(moment.index)}>{t("replay.reviewThisStep")}</button>
               {record && isPracticeTriggerVerdict(moment.explanation.verdict) && (
                 <a href={buildPracticeLaunchHash({
                   sourceRecordId: record.recordId,

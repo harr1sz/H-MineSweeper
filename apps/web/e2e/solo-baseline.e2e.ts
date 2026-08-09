@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createBoard } from "@h-minesweeper/game-core";
 
 const FIXED_NOW = Date.UTC(2026, 6, 30, 8);
@@ -70,6 +70,21 @@ async function clickBoardCell(
       y: (Math.floor(index / width) + 0.5) * (box.height / height),
     },
   });
+}
+
+async function clickReplayControlWithoutPageDrift(
+  page: Page,
+  control: Locator,
+): Promise<void> {
+  await control.scrollIntoViewIfNeeded();
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  const box = await control.boundingBox();
+  if (!box) throw new Error("复盘按钮布局不可测量");
+  await page.mouse.click(
+    box.x + box.width / 2,
+    box.y + box.height / 2,
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 }
 
 test("语言切换采用浏览器语言并保留当前模式状态", async ({ page }) => {
@@ -338,6 +353,35 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
   await expect(page.locator(".solo-history-list article")).toHaveCount(0);
 });
 
+test("普通游戏结束后可以立即重玩完全相同的棋盘", async ({ page }) => {
+  await useDeterministicSoloSeed(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await enterSolo(page);
+  const generated = createBoard({
+    width: 9,
+    height: 9,
+    mines: 10,
+    seed: FIXED_SEED,
+    startIndex: 40,
+    safeRadius: 1,
+  });
+  const mineIndex = generated.mines.findIndex((value) => value === 1);
+
+  await clickBoardCell(page, 40, 9, 9);
+  await clickBoardCell(page, mineIndex, 9, 9);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  const firstBoardHash = await page.locator(".solo-proof code").textContent();
+
+  await page.getByRole("button", { name: "重玩本图", exact: true }).click();
+  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
+  await expect(page.getByText("已按原来的雷位重开本图，计时重新开始。")).toBeVisible();
+  await expect(page.locator(".solo-proof code")).toHaveText(firstBoardHash ?? "");
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toHaveCount(0);
+
+  await clickBoardCell(page, mineIndex, 9, 9);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+});
+
 test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
   await useDeterministicSoloSeed(page);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -359,7 +403,30 @@ test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "本局复盘" })).toBeVisible();
   await expect(page.getByRole("img", { name: /复盘棋盘/ })).toBeVisible();
   await expect(page.getByText(/已检查 2 步/)).toBeVisible();
-  await page.getByRole("button", { name: "上一步" }).click();
+  const previousStep = page.getByRole("button", { name: "上一步" });
+  await clickReplayControlWithoutPageDrift(page, previousStep);
+  await expect(page.getByText("这是受保护的首击")).toBeVisible();
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "下一步" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "上一关键步" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "下一关键步" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "查看动作后" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "查看完整棋盘" }),
+  );
+  await clickReplayControlWithoutPageDrift(page, previousStep);
   await expect(page.getByText("这是受保护的首击")).toBeVisible();
   await expect(page.locator(".replay-explanation > dl")).not.toContainText(/#\d+|COMPLETE|PARTIAL|CSP_/);
   await page.locator(".replay-technical-details summary").click();
@@ -369,7 +436,10 @@ test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
   await expect(page.locator(".replay-technical-details")).not.toContainText(
     /COMPLETE|PARTIAL|CONTRADICTION|SINGLE_|SUBSET_|GLOBAL_|CSP_/u,
   );
-  await page.getByRole("button", { name: "查看每一步" }).click();
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "查看每一步" }),
+  );
   await expect(page.locator(".replay-timeline li")).toHaveCount(2);
   await expect(page.locator(".replay-timeline")).toContainText("第 1 步");
   await expect(page.locator(".replay-timeline")).not.toContainText(/REVEAL|MINE|proof|证明/);
