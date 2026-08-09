@@ -225,9 +225,9 @@ async function autoFlagGlyphPixelCounts(
       let focusPixels = 0;
       for (let offset = 0; offset < image.data.length; offset += 4) {
         if (
-          Math.abs((image.data[offset] ?? 0) - 255) <= 2 &&
-          Math.abs((image.data[offset + 1] ?? 0) - 217) <= 2 &&
-          Math.abs((image.data[offset + 2] ?? 0) - 137) <= 2 &&
+          Math.abs((image.data[offset] ?? 0) - 247) <= 2 &&
+          Math.abs((image.data[offset + 1] ?? 0) - 198) <= 2 &&
+          Math.abs((image.data[offset + 2] ?? 0) - 106) <= 2 &&
           (image.data[offset + 3] ?? 0) > 0
         ) {
           focusPixels += 1;
