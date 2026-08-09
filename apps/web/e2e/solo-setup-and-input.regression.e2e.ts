@@ -100,6 +100,49 @@ test("solo uses a configuration gateway before rendering the board", async ({
   await expect(page.getByText("物理点击")).toBeVisible();
 });
 
+test("advanced settings persist question marks and total-seconds timing", async ({
+  page,
+}) => {
+  await openSoloSetup(page);
+
+  await page.getByText("高级设置", { exact: true }).click();
+  const questionMarks = page.getByRole("group", { name: "是否使用问号标记" });
+  const timerFormat = page.getByRole("group", { name: "计时显示方式" });
+  await expect(questionMarks.getByRole("button", { name: "关闭" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(timerFormat.getByRole("button", { name: "分:秒" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await questionMarks.getByRole("button", { name: "开启" }).click();
+  await timerFormat.getByRole("button", { name: "累计秒数" }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem("hms-solo-preferences-v1");
+    return raw ? JSON.parse(raw) : null;
+  })).toMatchObject({
+    questionMarksEnabled: true,
+    timerFormat: "seconds",
+  });
+
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.locator(".solo-clock")).toHaveText("0.00 秒");
+  await expect(page.getByText("右键：旗帜 / 问号", { exact: true })).toBeVisible();
+
+  const board = page.locator('canvas[role="grid"]');
+  const box = await board.boundingBox();
+  expect(box).not.toBeNull();
+  const position = cellPosition(0, 9, box?.width ?? 270);
+  await board.click({ button: "right", position });
+  await expect(board).toHaveAttribute("aria-label", /已插旗/);
+  await board.click({ button: "right", position });
+  await expect(board).toHaveAttribute("aria-label", /问号标记/);
+  await board.click({ button: "right", position });
+  await expect(board).toHaveAttribute("aria-label", /未揭开/);
+});
+
 test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", async ({
   page,
 }) => {

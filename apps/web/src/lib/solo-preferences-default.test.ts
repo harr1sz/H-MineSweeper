@@ -6,7 +6,11 @@ import {
 
 describe("solo board color defaults", () => {
   it("uses classic for a player without saved preferences", () => {
-    expect(resolveSoloLaunchPreferences(null).boardTheme).toBe("classic");
+    expect(resolveSoloLaunchPreferences(null)).toMatchObject({
+      boardTheme: "classic",
+      questionMarksEnabled: false,
+      timerFormat: "clock",
+    });
   });
 
   it("keeps an existing player's saved board color", () => {

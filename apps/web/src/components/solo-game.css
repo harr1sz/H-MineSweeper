@@ -90,6 +90,49 @@
   gap: 18px;
 }
 
+.solo-advanced-settings {
+  margin: -6px 0 26px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 22px;
+}
+
+.solo-advanced-settings summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.solo-advanced-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.solo-advanced-settings summary::before {
+  content: "+";
+  color: var(--gold);
+  font: 700 14px var(--mono);
+}
+
+.solo-advanced-settings[open] summary::before {
+  content: "−";
+}
+
+.solo-advanced-settings summary span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.solo-advanced-settings summary small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.solo-advanced-settings[open] summary {
+  margin-bottom: 14px;
+}
+
 .solo-preference-list {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -463,6 +506,10 @@
 .solo-compact-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+}
+
+.solo-binary-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .solo-theme-tabs {
@@ -919,6 +966,16 @@
     grid-template-columns: 1fr;
     gap: 10px;
     padding: 16px 0;
+  }
+
+  .solo-advanced-settings summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .solo-advanced-settings summary small {
+    flex-basis: calc(100% - 28px);
+    margin-left: 26px;
   }
 
   .solo-game-layout {

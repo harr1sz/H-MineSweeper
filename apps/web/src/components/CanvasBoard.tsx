@@ -1,4 +1,7 @@
-import type { GameState } from "@h-minesweeper/game-core";
+import {
+  CELL_QUESTIONED,
+  type GameState,
+} from "@h-minesweeper/game-core";
 import { useLocale } from "../i18n";
 import {
   useCallback,
@@ -93,6 +96,7 @@ export interface CanvasBoardProps {
   showTerminalMines?: boolean;
   terminalDetonatedIndex?: number;
   boardTheme?: BoardTheme;
+  questionMarksEnabled?: boolean;
   effectsProfile?: BoardEffectsProfile;
   actionVisual?: BoardActionVisual;
   coachOverlay?: BoardCoachOverlay | undefined;
@@ -107,6 +111,7 @@ export interface CanvasBoardProps {
 const HIDDEN = 0;
 const REVEALED = 1;
 const FLAGGED = 2;
+const QUESTIONED = CELL_QUESTIONED;
 const MIN_CELL_SIZE = 18;
 const MAX_CELL_SIZE = 30;
 const COARSE_MAX_CELL_SIZE = 52;
@@ -538,6 +543,26 @@ function drawFlagMarker(
   context.restore();
 }
 
+function drawQuestionMarker(
+  context: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  metrics: BoardMarkMetrics,
+  palette: BoardPalette,
+) {
+  context.save();
+  context.font = `${palette.numberFontWeight} ${metrics.numberFontSize}px ${palette.numberFontFamily}`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.lineJoin = "round";
+  context.strokeStyle = palette.focusGuard;
+  context.lineWidth = Math.max(2, metrics.iconLineWidth + 1);
+  context.strokeText("?", centerX, centerY + metrics.numberFontSize * 0.03);
+  context.fillStyle = palette.flag;
+  context.fillText("?", centerX, centerY + metrics.numberFontSize * 0.03);
+  context.restore();
+}
+
 function drawMineMarker(
   context: CanvasRenderingContext2D,
   centerX: number,
@@ -794,6 +819,7 @@ export function CanvasBoard({
   showTerminalMines = false,
   terminalDetonatedIndex,
   boardTheme = "classic",
+  questionMarksEnabled = false,
   effectsProfile = "full",
   actionVisual,
   coachOverlay,
@@ -1037,12 +1063,12 @@ export function CanvasBoard({
       showTerminalMines &&
       game?.outcome === "LOST" &&
       hasMine &&
-      storedVisibility === HIDDEN
+      (storedVisibility === HIDDEN || storedVisibility === QUESTIONED)
         ? REVEALED
         : showTerminalMines &&
             game?.outcome === "WON" &&
             hasMine &&
-            storedVisibility === HIDDEN
+            (storedVisibility === HIDDEN || storedVisibility === QUESTIONED)
           ? FLAGGED
           : storedVisibility;
 
@@ -1132,6 +1158,8 @@ export function CanvasBoard({
           palette,
           autoFlaggedIndexSet.has(index) ? palette.focus : palette.flag,
         );
+      } else if (visibility === QUESTIONED) {
+        drawQuestionMarker(context, centerX, centerY, markMetrics, palette);
       } else if (visibility === REVEALED && game) {
         if (hasMine) {
           drawMineMarker(context, centerX, centerY, markMetrics, palette);
@@ -1757,6 +1785,9 @@ export function CanvasBoard({
     if (visibility === FLAGGED) {
       return t("board.cell.flagged", { row, column });
     }
+    if (visibility === QUESTIONED) {
+      return t("board.cell.questioned", { row, column });
+    }
     if (visibility !== REVEALED) {
       return t("board.cell.hidden", { row, column });
     }
@@ -1816,7 +1847,10 @@ export function CanvasBoard({
             className={`mine-board${disabled ? " is-disabled" : ""}${reducedMotion ? " reduced-motion" : ""}`}
             role="grid"
             tabIndex={0}
-            aria-label={t("board.aria", { width, height, cell: focusedCellLabel })}
+            aria-label={t(
+              questionMarksEnabled ? "board.aria.withQuestionMarks" : "board.aria",
+              { width, height, cell: focusedCellLabel },
+            )}
             aria-describedby={ariaDescribedBy}
             onContextMenu={(event) => event.preventDefault()}
             onDoubleClick={handleDoubleClick}

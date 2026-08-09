@@ -210,11 +210,15 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
     const cells = new Int8Array(record.board.spec.width * record.board.spec.height);
     cells.fill(-2);
     for (const index of replay.initialFlags) cells[index] = -3;
+    for (const index of replay.initialQuestions ?? []) cells[index] = -4;
     for (let index = 0; index < selectedSeq; index += 1) {
       const step = result.steps[index];
       if (!step) continue;
       for (const revealed of step.revealed) cells[revealed.index] = revealed.value;
       if (step.flagChange) cells[step.flagChange.index] = step.flagChange.flagged ? -3 : -2;
+      if (step.questionChange) {
+        cells[step.questionChange.index] = step.questionChange.questioned ? -4 : -2;
+      }
     }
     return cells;
   }, [record, replay, result, selectedSeq]);
@@ -241,6 +245,9 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
       if (step) {
         for (const revealed of step.revealed) cells[revealed.index] = revealed.value;
         if (step.flagChange) cells[step.flagChange.index] = step.flagChange.flagged ? -3 : -2;
+        if (step.questionChange) {
+          cells[step.questionChange.index] = step.questionChange.questioned ? -4 : -2;
+        }
       }
     }
     const currentTarget = focusedSuggestion ?? selectedAction?.cellIndex;
@@ -310,7 +317,14 @@ export function ReplayReview({ recordId, onExit }: ReplayReviewProps) {
     const coordinate = coordinateText(action.cellIndex);
     if (action.actionType === "REVEAL") return t("replay.action.reveal", { coordinate });
     if (action.actionType === "CHORD") return t("replay.action.chord", { coordinate });
-    const flagged = result?.steps[index]?.flagChange?.flagged;
+    const step = result?.steps[index];
+    if (step?.questionChange?.questioned === true) {
+      return t("replay.action.question", { coordinate });
+    }
+    if (step?.questionChange?.questioned === false) {
+      return t("replay.action.clearQuestion", { coordinate });
+    }
+    const flagged = step?.flagChange?.flagged;
     return t(flagged === false ? "replay.action.unflag" : "replay.action.flag", { coordinate });
   };
 

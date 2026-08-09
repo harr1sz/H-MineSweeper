@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocale, type MessageDescriptor } from "../i18n";
+import type { SoloTimerFormatPreference } from "../lib/solo-preferences";
+import { formatSoloElapsedTime } from "../lib/solo-time";
 import {
   PRACTICE_HISTORY_IMPORT_MAX_BYTES,
   PracticeHistoryCapacityError,
@@ -15,14 +17,7 @@ const PRACTICE_HISTORY_PAGE_SIZE = 20;
 interface PracticeHistoryProps {
   readonly store: PracticeHistoryStore;
   readonly refreshToken: number;
-}
-
-function formatPracticeTime(elapsedMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1_000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  const hundredths = Math.floor((Math.max(0, elapsedMs) % 1_000) / 10);
-  return `${minutes}:${String(seconds).padStart(2, "0")}.${String(hundredths).padStart(2, "0")}`;
+  readonly timerFormat: SoloTimerFormatPreference;
 }
 
 function downloadJson(document: unknown, filename: string): void {
@@ -37,7 +32,7 @@ function downloadJson(document: unknown, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function PracticeHistory({ store, refreshToken }: PracticeHistoryProps) {
+export function PracticeHistory({ store, refreshToken, timerFormat }: PracticeHistoryProps) {
   const { locale, t } = useLocale();
   const [snapshot, setSnapshot] = useState<PracticeHistoryReadResult | null>(null);
   const [message, setMessage] = useState<MessageDescriptor | null>(null);
@@ -214,7 +209,7 @@ export function PracticeHistory({ store, refreshToken }: PracticeHistoryProps) {
                 <b>{t(record.outcome === "WON" ? "practice.history.won" : "practice.history.lost")}</b>
                 <div>
                   <span>{t("practice.history.time")}</span>
-                  <strong>{formatPracticeTime(record.summary.elapsedMs)}</strong>
+                  <strong>{formatSoloElapsedTime(record.summary.elapsedMs, timerFormat, locale)}</strong>
                 </div>
                 <div>
                   <span>{t("practice.history.playerActions")}</span>

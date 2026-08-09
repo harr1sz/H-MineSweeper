@@ -24,14 +24,17 @@ import {
   recordTrainingSessionTerminal,
   sameSoloConfigurationAndRules,
   touchTrainingSession,
+  verifySoloReplay,
   type SoloRunRecordV1,
   type SoloRunRecordV2,
   type SoloReplayV1,
 } from "./solo-history";
 import type { SoloBoardConfig } from "./solo";
 import {
+  CELL_HIDDEN,
   createBoard,
   createGameState,
+  cycleCellMark,
   hashBoard,
   hashGameState,
   revealCell,
@@ -180,6 +183,61 @@ describe("solo history data contract", () => {
     await expect(
       createMemorySoloHistoryStore().put(pair.record, tampered),
     ).rejects.toBeInstanceOf(SoloHistoryValidationError);
+  });
+
+  it("replays the optional flag, question, clear marking cycle", () => {
+    const base = replayRecord("question-cycle");
+    const state = createGameState(createBoard(base.record.board.spec));
+    const target = state.board.spec.startIndex === 1 ? 2 : 1;
+    const actions: SoloReplayV1["actions"][number][] = [];
+    for (let step = 0; step < 3; step += 1) {
+      const preStateHash = hashGameState(state);
+      const delta = cycleCellMark(state, target);
+      actions.push({
+        seq: actions.length + 1,
+        elapsedMs: actions.length * 100,
+        actionType: "TOGGLE_FLAG",
+        cellIndex: target,
+        physicalClicks: 1,
+        preStateHash,
+        accepted: delta.accepted,
+        postStateHash: delta.stateHash,
+      });
+    }
+    expect(state.visibility[target]).toBe(CELL_HIDDEN);
+    const mineIndex = state.board.mines.findIndex((mine) => mine === 1);
+    const preStateHash = hashGameState(state);
+    const loss = revealCell(state, mineIndex);
+    actions.push({
+      seq: actions.length + 1,
+      elapsedMs: 300,
+      actionType: "REVEAL",
+      cellIndex: mineIndex,
+      physicalClicks: 1,
+      preStateHash,
+      accepted: loss.accepted,
+      postStateHash: loss.stateHash,
+    });
+    const replay: SoloReplayV1 = {
+      schemaVersion: 1,
+      recordId: base.record.recordId,
+      initialFlags: [],
+      initialQuestions: [],
+      questionMarksEnabled: true,
+      actions,
+    };
+    const recordWithQuestions: SoloRunRecordV2 = {
+      ...base.record,
+      outcome: "LOST",
+      replay: {
+        status: "COMPLETE",
+        schemaVersion: 1,
+        actionCount: actions.length,
+        actionLogHash: hashSoloReplay(replay),
+      },
+    };
+
+    expect(verifySoloReplay(recordWithQuestions, replay).state.outcome).toBe("LOST");
   });
 
   it("imports V1 and V2 documents without fabricating legacy replay", async () => {

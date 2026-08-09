@@ -1,10 +1,12 @@
 import {
   CELL_FLAGGED,
+  CELL_QUESTIONED,
   CELL_REVEALED,
   analyzeVisibleBoard,
   chordCell,
   createBoard,
   createGameState,
+  cycleCellMark,
   revealCell,
   toggleFlag,
   type GameState,
@@ -34,6 +36,7 @@ export type PracticeReplayWorkerResponse =
         readonly before: VisibleBoardAnalysis;
         readonly revealed: readonly { readonly index: number; readonly value: number }[];
         readonly flagChange?: { readonly index: number; readonly flagged: boolean };
+        readonly questionChange?: { readonly index: number; readonly questioned: boolean };
         readonly accepted?: boolean;
         readonly hitMine: boolean;
         readonly outcome: GameState["outcome"];
@@ -74,13 +77,19 @@ function visibleState(
   };
 }
 
-function applyEvent(state: GameState, event: PracticeReplayEventV1) {
+function applyEvent(
+  state: GameState,
+  event: PracticeReplayEventV1,
+  questionMarksEnabled: boolean,
+) {
   if (event.eventType === "ASSISTANCE_SHOWN") return null;
   if (event.eventType === "PLAYER_ACTION") {
     return event.actionType === "REVEAL"
       ? revealCell(state, event.cellIndex)
       : event.actionType === "TOGGLE_FLAG"
-        ? toggleFlag(state, event.cellIndex)
+        ? questionMarksEnabled
+          ? cycleCellMark(state, event.cellIndex)
+          : toggleFlag(state, event.cellIndex)
         : chordCell(state, event.cellIndex);
   }
   return event.action === "REVEAL"
@@ -104,10 +113,17 @@ function buildResult(
     const state = createGameState(createBoard(request.record.board.spec));
     const provenMines = new Set<number>();
     for (const index of request.replay.initialFlags) toggleFlag(state, index);
+    for (const index of request.replay.initialQuestions ?? []) {
+      state.visibility[index] = CELL_QUESTIONED;
+    }
     let detonatedMine: number | undefined;
     const steps = request.replay.events.map((event) => {
       const before = analyzeVisibleBoard(visibleState(state, provenMines));
-      const delta = applyEvent(state, event);
+      const delta = applyEvent(
+        state,
+        event,
+        request.replay.questionMarksEnabled === true,
+      );
       if (event.eventType === "COACH_ACTION") {
         if (event.action === "FLAG") provenMines.add(event.cellIndex);
         else if (event.action === "UNFLAG") provenMines.delete(event.cellIndex);
@@ -131,6 +147,12 @@ function buildResult(
           flagChange: {
             index: delta.flagged.index,
             flagged: delta.flagged.flagged,
+          },
+        } : {}),
+        ...(delta?.questioned ? {
+          questionChange: {
+            index: delta.questioned.index,
+            questioned: delta.questioned.questioned,
           },
         } : {}),
         ...(event.eventType === "PLAYER_ACTION" ? { accepted: event.accepted } : {}),

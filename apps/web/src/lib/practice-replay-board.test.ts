@@ -45,4 +45,33 @@ describe("practice replay board state", () => {
     expect([...before]).toEqual([0, 1, -2, -2, -2]);
     expect([...after]).toEqual([0, 1, -3, -2, -2]);
   });
+
+  it("restores question marks and their later removal", () => {
+    const questionSteps = [
+      { revealed: [], questionChange: { index: 2, questioned: false } },
+    ];
+    const before = buildPracticeReplayBoardCells({
+      cellCount: 4,
+      initialFlags: [],
+      initialQuestions: [2],
+      steps: questionSteps,
+      selectedIndex: 0,
+      showAfter: false,
+      showTerminalTruth: false,
+      terminalCells: [-2, -2, -2, -2],
+    });
+    const after = buildPracticeReplayBoardCells({
+      cellCount: 4,
+      initialFlags: [],
+      initialQuestions: [2],
+      steps: questionSteps,
+      selectedIndex: 0,
+      showAfter: true,
+      showTerminalTruth: false,
+      terminalCells: [-2, -2, -2, -2],
+    });
+
+    expect([...before]).toEqual([-2, -2, -4, -2]);
+    expect([...after]).toEqual([-2, -2, -2, -2]);
+  });
 });

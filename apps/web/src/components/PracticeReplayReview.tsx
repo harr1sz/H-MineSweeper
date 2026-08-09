@@ -33,6 +33,8 @@ function proofForEvent(
 function practiceActionMessageId(action: string): MessageId {
   if (action === "FLAG") return "practice.action.flag";
   if (action === "UNFLAG") return "practice.action.unflag";
+  if (action === "QUESTION") return "practice.action.question";
+  if (action === "CLEAR_QUESTION") return "practice.action.clearQuestion";
   if (action === "CHORD") return "practice.action.chord";
   return "practice.action.reveal";
 }
@@ -110,6 +112,7 @@ export function PracticeReplayReview({ recordId, onExit }: PracticeReplayReviewP
     return buildPracticeReplayBoardCells({
       cellCount: record.board.spec.width * record.board.spec.height,
       initialFlags: replay.initialFlags,
+      initialQuestions: replay.initialQuestions ?? [],
       steps: result.steps,
       selectedIndex,
       showAfter,
@@ -182,7 +185,11 @@ export function PracticeReplayReview({ recordId, onExit }: PracticeReplayReviewP
     const action = selectedEvent.eventType === "COACH_ACTION"
       ? selectedEvent.action
       : selectedEvent.actionType === "TOGGLE_FLAG"
-        ? selectedStep?.flagChange?.flagged === false ? "UNFLAG" : "FLAG"
+        ? selectedStep?.questionChange?.questioned === true
+          ? "QUESTION"
+          : selectedStep?.questionChange?.questioned === false
+            ? "CLEAR_QUESTION"
+            : selectedStep?.flagChange?.flagged === false ? "UNFLAG" : "FLAG"
         : selectedEvent.actionType;
     return t(practiceActionMessageId(action), {
       coordinate: coordinate(selectedEvent.cellIndex),

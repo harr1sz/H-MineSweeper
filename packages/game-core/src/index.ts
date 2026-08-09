@@ -15,11 +15,13 @@ export const METRIC_RULES_VERSION = STATISTICS_RULES_VERSION;
 export const CELL_HIDDEN = 0 as const;
 export const CELL_REVEALED = 1 as const;
 export const CELL_FLAGGED = 2 as const;
+export const CELL_QUESTIONED = 3 as const;
 
 export type CellVisibility =
   | typeof CELL_HIDDEN
   | typeof CELL_REVEALED
-  | typeof CELL_FLAGGED;
+  | typeof CELL_FLAGGED
+  | typeof CELL_QUESTIONED;
 
 export type GameOutcome = "PLAYING" | "WON" | "LOST";
 
@@ -218,6 +220,11 @@ export interface FlagDelta {
   readonly flagged: boolean;
 }
 
+export interface QuestionMarkDelta {
+  readonly index: number;
+  readonly questioned: boolean;
+}
+
 export type ActionRejectReason =
   | "INVALID_INDEX"
   | "GAME_OVER"
@@ -233,6 +240,7 @@ export interface RevealDelta {
   readonly rejectReason?: ActionRejectReason;
   readonly revealed: RevealedCell[];
   readonly flagged?: FlagDelta;
+  readonly questioned?: QuestionMarkDelta;
   readonly hitMine?: boolean;
   readonly completed?: boolean;
   readonly progress: number;
@@ -793,6 +801,10 @@ function isValidCellIndex(state: GameState, index: number): boolean {
   );
 }
 
+function isCoveredCell(visibility: number): boolean {
+  return visibility === CELL_HIDDEN || visibility === CELL_QUESTIONED;
+}
+
 export function getProgress(state: GameState): number {
   const safeCellCount =
     state.board.spec.width * state.board.spec.height - state.board.spec.mines;
@@ -916,7 +928,7 @@ function revealSafeRegion(
       index,
     )) {
       if (
-        visibility[neighbor] !== CELL_HIDDEN ||
+        !isCoveredCell(visibility[neighbor] ?? CELL_HIDDEN) ||
         board.mines[neighbor] === 1
       ) {
         continue;
@@ -1005,6 +1017,46 @@ export function toggleFlag(state: GameState, index: number): RevealDelta {
   };
 }
 
+/**
+ * Cycles a covered cell through flag, question mark, and clear. This is an
+ * opt-in Solo convenience; authoritative multiplayer rules keep using the
+ * two-state `toggleFlag` action.
+ */
+export function cycleCellMark(state: GameState, index: number): RevealDelta {
+  if (!isValidCellIndex(state, index)) {
+    return rejectedDelta(state, "INVALID_INDEX");
+  }
+  if (state.outcome !== "PLAYING") {
+    return rejectedDelta(state, "GAME_OVER");
+  }
+  if (state.visibility[index] === CELL_REVEALED) {
+    return rejectedDelta(state, "ALREADY_REVEALED");
+  }
+
+  const previous = state.visibility[index];
+  if (previous === CELL_HIDDEN) {
+    state.visibility[index] = CELL_FLAGGED;
+  } else if (previous === CELL_FLAGGED) {
+    state.visibility[index] = CELL_QUESTIONED;
+  } else {
+    state.visibility[index] = CELL_HIDDEN;
+  }
+  return {
+    accepted: true,
+    revealed: [],
+    ...(previous === CELL_HIDDEN
+      ? { flagged: { index, flagged: true } }
+      : previous === CELL_FLAGGED
+        ? {
+            flagged: { index, flagged: false },
+            questioned: { index, questioned: true },
+          }
+        : { questioned: { index, questioned: false } }),
+    progress: getProgress(state),
+    stateHash: hashGameState(state),
+  };
+}
+
 export function chordCell(state: GameState, index: number): RevealDelta {
   if (!isValidCellIndex(state, index)) {
     return rejectedDelta(state, "INVALID_INDEX");
@@ -1032,7 +1084,7 @@ export function chordCell(state: GameState, index: number): RevealDelta {
   for (const neighbor of neighbors) {
     if (state.visibility[neighbor] === CELL_FLAGGED) {
       flagCount += 1;
-    } else if (state.visibility[neighbor] === CELL_HIDDEN) {
+    } else if (isCoveredCell(state.visibility[neighbor] ?? CELL_HIDDEN)) {
       hiddenNeighbors.push(neighbor);
     }
   }
@@ -1047,7 +1099,7 @@ export function chordCell(state: GameState, index: number): RevealDelta {
   const revealed: RevealedCell[] = [];
   let hitMine = false;
   for (const neighbor of hiddenNeighbors) {
-    if (state.visibility[neighbor] !== CELL_HIDDEN) {
+    if (!isCoveredCell(state.visibility[neighbor] ?? CELL_HIDDEN)) {
       continue;
     }
     if (state.board.mines[neighbor] === 1) {
@@ -1161,7 +1213,7 @@ function collectConstraints(state: GameState): Constraint[] {
       board.spec.height,
       index,
     )) {
-      if (visibility[neighbor] === CELL_HIDDEN) {
+      if (isCoveredCell(visibility[neighbor] ?? CELL_HIDDEN)) {
         cells.push(neighbor);
       } else if (visibility[neighbor] === CELL_FLAGGED) {
         flagged += 1;
@@ -1308,7 +1360,7 @@ export function isProvablySafeCell(
   if (
     state.outcome !== "PLAYING" ||
     !isValidCellIndex(state, index) ||
-    state.visibility[index] !== CELL_HIDDEN
+    !isCoveredCell(state.visibility[index] ?? CELL_HIDDEN)
   ) {
     return false;
   }

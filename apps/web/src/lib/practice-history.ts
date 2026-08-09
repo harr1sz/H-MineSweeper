@@ -1,10 +1,12 @@
 import {
   CELL_FLAGGED,
+  CELL_QUESTIONED,
   CELL_REVEALED,
   analyzeVisibleBoard,
   chordCell,
   createBoard,
   createGameState,
+  cycleCellMark,
   hashBoard,
   hashGameState,
   hashVisibleBoardState,
@@ -90,6 +92,8 @@ export interface PracticeReplayV1 {
   readonly schemaVersion: typeof PRACTICE_REPLAY_SCHEMA_VERSION;
   readonly recordId: string;
   readonly initialFlags: readonly number[];
+  readonly initialQuestions?: readonly number[];
+  readonly questionMarksEnabled?: boolean;
   readonly events: readonly PracticeReplayEventV1[];
 }
 
@@ -295,6 +299,25 @@ export function validatePracticeReplayV1(
   }
   if (!isSafeIntegerArray(value.initialFlags)) {
     issues.push(`${path}.initialFlags is invalid`);
+  }
+  if (
+    value.initialQuestions !== undefined &&
+    !isSafeIntegerArray(value.initialQuestions)
+  ) {
+    issues.push(`${path}.initialQuestions is invalid`);
+  }
+  if (
+    value.questionMarksEnabled !== undefined &&
+    typeof value.questionMarksEnabled !== "boolean"
+  ) {
+    issues.push(`${path}.questionMarksEnabled is invalid`);
+  }
+  if (
+    Array.isArray(value.initialQuestions) &&
+    value.initialQuestions.length > 0 &&
+    value.questionMarksEnabled !== true
+  ) {
+    issues.push(`${path}.initialQuestions requires question marks`);
   }
   if (!Array.isArray(value.events) || value.events.length > SOLO_REPLAY_MAX_ACTIONS) {
     issues.push(`${path}.events is invalid`);
@@ -586,11 +609,17 @@ function verifyProof(
   }
 }
 
-function applyPlayerAction(state: GameState, event: PracticePlayerActionEventV1) {
+function applyPlayerAction(
+  state: GameState,
+  event: PracticePlayerActionEventV1,
+  questionMarksEnabled: boolean,
+) {
   return event.actionType === "REVEAL"
     ? revealCell(state, event.cellIndex)
     : event.actionType === "TOGGLE_FLAG"
-      ? toggleFlag(state, event.cellIndex)
+      ? questionMarksEnabled
+        ? cycleCellMark(state, event.cellIndex)
+        : toggleFlag(state, event.cellIndex)
       : chordCell(state, event.cellIndex);
 }
 
@@ -614,6 +643,12 @@ export function verifyPracticeReplay(
   for (const index of replay.initialFlags) {
     const delta = toggleFlag(state, index);
     if (!delta.accepted) throw new PracticeHistoryValidationError(["Practice replay has an invalid initial flag"]);
+  }
+  for (const index of replay.initialQuestions ?? []) {
+    if (index >= state.visibility.length) {
+      throw new PracticeHistoryValidationError(["Practice replay has an invalid initial question mark"]);
+    }
+    state.visibility[index] = CELL_QUESTIONED;
   }
   for (let eventIndex = 0; eventIndex < replay.events.length; eventIndex += 1) {
     const event = replay.events[eventIndex]!;
@@ -654,7 +689,7 @@ export function verifyPracticeReplay(
       }
     }
     const delta = event.eventType === "PLAYER_ACTION"
-      ? applyPlayerAction(state, event)
+      ? applyPlayerAction(state, event, replay.questionMarksEnabled === true)
       : applyCoachAction(state, event);
     if (event.eventType === "COACH_ACTION" && !delta.accepted) {
       throw new PracticeHistoryValidationError([`Coach event ${event.seq} was not accepted`]);

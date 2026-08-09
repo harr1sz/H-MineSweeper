@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CELL_FLAGGED,
   CELL_HIDDEN,
+  CELL_QUESTIONED,
   CELL_REVEALED,
   CLICK_COUNTING_RULES_VERSION,
   METRIC_RULES_VERSION,
@@ -23,6 +24,7 @@ import {
   countBoardActions,
   createBoard,
   createGameState,
+  cycleCellMark,
   createXoshiro128StarStar,
   getBoardSpecValidationErrors,
   getDeterministicDeductions,
@@ -264,6 +266,31 @@ describe("game actions", () => {
     });
     expect(toggleFlag(state, 0).flagged).toEqual({ index: 0, flagged: false });
     expect(state.visibility[0]).toBe(CELL_HIDDEN);
+  });
+
+  it("cycles an optional question mark and still treats it as covered", () => {
+    const state = createGameState(manualBoard(5, 5, [0], 24));
+
+    expect(cycleCellMark(state, 1).flagged).toEqual({ index: 1, flagged: true });
+    expect(cycleCellMark(state, 1).flagged).toEqual({ index: 1, flagged: false });
+    expect(state.visibility[1]).toBe(CELL_QUESTIONED);
+    expect(revealCell(state, 1).accepted).toBe(true);
+    expect(state.visibility[1]).toBe(CELL_REVEALED);
+  });
+
+  it("includes questioned cells when a chord opens covered neighbors", () => {
+    const state = createGameState(manualBoard(5, 5, [0], 6));
+    revealCell(state, 6);
+    toggleFlag(state, 0);
+    cycleCellMark(state, 1);
+    cycleCellMark(state, 1);
+    expect(state.visibility[1]).toBe(CELL_QUESTIONED);
+
+    const delta = chordCell(state, 6);
+
+    expect(delta.accepted).toBe(true);
+    expect(delta.completed).toBe(true);
+    expect(state.visibility[1]).toBe(CELL_REVEALED);
   });
 
   it("chords with the exact flag count and completes a board", () => {
