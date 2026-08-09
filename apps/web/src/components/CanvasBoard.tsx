@@ -793,7 +793,7 @@ export function CanvasBoard({
   reducedMotion = false,
   showTerminalMines = false,
   terminalDetonatedIndex,
-  boardTheme = "black-gold",
+  boardTheme = "classic",
   effectsProfile = "full",
   actionVisual,
   coachOverlay,

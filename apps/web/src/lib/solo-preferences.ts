@@ -157,6 +157,6 @@ export function resolveSoloLaunchPreferences(
       : { ...SOLO_PRESETS.beginner, mode: generationMode },
     preset: valid ? stored?.preset ?? "beginner" : "beginner",
     statsLevel: stored?.statsLevel ?? "basic",
-    boardTheme: stored?.boardTheme ?? "black-gold",
+    boardTheme: stored?.boardTheme ?? "classic",
   };
 }
