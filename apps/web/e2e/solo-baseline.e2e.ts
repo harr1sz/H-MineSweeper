@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createBoard } from "@h-minesweeper/game-core";
 
 const FIXED_NOW = Date.UTC(2026, 6, 30, 8);
@@ -11,16 +11,16 @@ const FIXED_SEED = `solo-v1-${FIXED_NOW.toString(36)}-${Array.from(
 async function enterSoloSetup(page: Page): Promise<void> {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
 }
 
 async function enterSolo(page: Page): Promise<void> {
   await enterSoloSetup(page);
-  await page.getByRole("button", { name: "开始对局" }).click();
-  await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "扫雷" })).toBeVisible();
 }
 
 async function expectNoPageHorizontalOverflow(page: Page): Promise<void> {
@@ -72,6 +72,21 @@ async function clickBoardCell(
   });
 }
 
+async function clickReplayControlWithoutPageDrift(
+  page: Page,
+  control: Locator,
+): Promise<void> {
+  await control.scrollIntoViewIfNeeded();
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+  const box = await control.boundingBox();
+  if (!box) throw new Error("复盘按钮布局不可测量");
+  await page.mouse.click(
+    box.x + box.width / 2,
+    box.y + box.height / 2,
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+}
+
 test("语言切换采用浏览器语言并保留当前模式状态", async ({ page }) => {
   await page.goto("/");
   const duel = page.locator(".home-mode-option").nth(1);
@@ -97,7 +112,7 @@ test("语言切换采用浏览器语言并保留当前模式状态", async ({ pa
   await page.getByRole("button", { name: "Switch to Chinese" }).click();
   await expect.poll(() => page.evaluate(() =>
     document.querySelector('meta[property="og:description"]')?.getAttribute("content"),
-  )).toBe("本地单人扫雷训练、可验证复盘与引导练习。");
+  )).toBe("单人扫雷、赛后复盘和针对性练习，成绩保存在你的设备上。");
 });
 
 test("320px 窄屏下语言入口保持可见且不造成横向溢出", async ({ page }) => {
@@ -196,7 +211,7 @@ test("等效 200% 缩放的 640 CSS 像素视口保持 reflow", async ({ page })
     page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "更改配置" }),
+    page.getByRole("button", { name: "游戏设置" }),
   ).toBeVisible();
   await expectNoPageHorizontalOverflow(page);
 });
@@ -209,18 +224,17 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .locator(".solo-tabs")
     .getByRole("button", { name: /^高级 30×16/ });
   await expert.click();
-  await page.getByText("高级设置", { exact: true }).click();
   await page
-    .getByRole("group", { name: "统计数据层级" })
-    .getByRole("button", { name: "详细数据" })
+    .getByRole("group", { name: "对局数据详细程度" })
+    .getByRole("button", { name: "详细" })
     .click();
 
   await page
     .getByRole("group", { name: "棋盘显示方案" })
-    .getByRole("button", { name: "高对比" })
+    .getByRole("button", { name: "象牙战术" })
     .click();
-  await page.getByRole("button", { name: "开始对局" }).click();
-  await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "扫雷" })).toBeVisible();
 
   await expect
     .poll(() =>
@@ -231,20 +245,19 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .not.toBeNull();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
   await expect(expert).toHaveClass(/is-active/);
-  await page.getByText("高级设置", { exact: true }).click();
   await expect(
     page
-      .getByRole("group", { name: "统计数据层级" })
-      .getByRole("button", { name: "详细数据" }),
+      .getByRole("group", { name: "对局数据详细程度" })
+      .getByRole("button", { name: "详细" }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page
       .getByRole("group", { name: "棋盘显示方案" })
-      .getByRole("button", { name: "高对比" }),
+      .getByRole("button", { name: "象牙战术" }),
   ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(
     page.getByRole("grid", { name: /^30 乘 16 扫雷棋盘/ }),
   ).toBeVisible();
@@ -269,14 +282,18 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
 
   await clickBoardCell(page, 40, 9, 9);
   await clickBoardCell(page, mineIndex, 9, 9);
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
-  await expect(page.getByText("最终 CPS", { exact: true })).toBeVisible();
-  await expect(page.getByText("本局未完成，不产生 3BV/s 和 IOE 成绩。")).toBeVisible();
-  await page.getByRole("button", { name: "展开历史 · 1" }).click();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(
+    page.getByText("最终点击速度（CPS）", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("这局没有完成，因此不计算解题速度和操作效率。"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "查看记录 · 1" }).click();
   const lossHistoryRow = page.locator(".solo-history-list article");
   await expect(lossHistoryRow).toHaveCount(1);
-  await expect(lossHistoryRow).toContainText("3BV/s —");
-  await expect(lossHistoryRow).toContainText("IOE —");
+  await expect(lossHistoryRow).toContainText("解题速度（3BV/s） —");
+  await expect(lossHistoryRow).toContainText("操作效率（IOE） —");
   const persistedLossMetrics = await page.evaluate(async () => {
     return await new Promise<{ threeBvPerSecond: unknown; ioe: unknown }>(
       (resolve, reject) => {
@@ -304,34 +321,67 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
   });
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
-  await page.getByRole("button", { name: "开始对局" }).click();
-  await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "扫雷" })).toBeVisible();
   await expect(page.locator(".solo-history-list article")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "更改配置" }).click();
+  await page.getByRole("button", { name: "游戏设置" }).click();
   await page
     .locator(".solo-tabs")
     .getByRole("button", { name: /^高级 30×16/ })
     .click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(
-    page.getByRole("button", { name: "当前配置 · 0" }),
+    page.getByRole("button", { name: "当前设置 · 0" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "全部 · 1" }).click();
   await expect(page.locator(".solo-history-list article")).toHaveCount(1);
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "导出 JSON" }).click();
+  await page.getByRole("button", { name: "导出记录" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(
     /^h-minesweeper-solo-history-\d{4}-\d{2}-\d{2}\.json$/,
   );
 
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "删除全部历史" }).click();
-  await expect(page.getByText("本地单人历史已删除。")).toBeVisible();
+  await page.getByRole("button", { name: "删除所有记录" }).click();
+  await expect(page.getByText("游戏记录已删除")).toBeVisible();
   await expect(page.locator(".solo-history-list article")).toHaveCount(0);
+});
+
+test("普通游戏重玩本图时保留雷位并等待新的首击", async ({ page }) => {
+  await useDeterministicSoloSeed(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await enterSolo(page);
+  const generated = createBoard({
+    width: 9,
+    height: 9,
+    mines: 10,
+    seed: FIXED_SEED,
+    startIndex: 40,
+    safeRadius: 1,
+  });
+  const mineIndex = generated.mines.findIndex((value) => value === 1);
+
+  await clickBoardCell(page, 40, 9, 9);
+  await clickBoardCell(page, mineIndex, 9, 9);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "回到踩雷前一步", exact: true }),
+  ).toHaveCount(0);
+  const firstBoardHash = await page.locator(".solo-proof code").textContent();
+
+  await page.getByRole("button", { name: "重玩本图", exact: true }).click();
+  await expect(page.getByText("等待首击", { exact: true })).toBeVisible();
+  await expect(page.locator(".solo-clock")).toHaveText("00:00.00");
+  await expect(page.getByText("雷位没有变化，点击任意格重新开始。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toHaveCount(0);
+
+  await clickBoardCell(page, mineIndex, 9, 9);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(page.locator(".solo-proof code")).toHaveText(firstBoardHash ?? "");
 });
 
 test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
@@ -349,21 +399,49 @@ test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {
   const mineIndex = generated.mines.findIndex((value) => value === 1);
   await clickBoardCell(page, 40, 9, 9);
   await clickBoardCell(page, mineIndex, 9, 9);
-  const analyze = page.getByRole("link", { name: "分析本局" });
+  const analyze = page.getByRole("link", { name: "复盘本局" });
   await expect(analyze).toBeVisible();
   await analyze.click();
-  await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "本局复盘" })).toBeVisible();
   await expect(page.getByRole("img", { name: /复盘棋盘/ })).toBeVisible();
-  await expect(page.getByText(/已核对 2 步/)).toBeVisible();
-  await page.getByRole("button", { name: "上一步" }).click();
+  await expect(page.getByText(/已检查 2 步/)).toBeVisible();
+  const previousStep = page.getByRole("button", { name: "上一步" });
+  await clickReplayControlWithoutPageDrift(page, previousStep);
+  await expect(page.getByText("这是受保护的首击")).toBeVisible();
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "下一步" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "上一关键步" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "下一关键步" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "查看动作后" }),
+  );
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "查看完整棋盘" }),
+  );
+  await clickReplayControlWithoutPageDrift(page, previousStep);
   await expect(page.getByText("这是受保护的首击")).toBeVisible();
   await expect(page.locator(".replay-explanation > dl")).not.toContainText(/#\d+|COMPLETE|PARTIAL|CSP_/);
   await page.locator(".replay-technical-details summary").click();
-  await expect(page.locator(".replay-technical-details")).toContainText("当前可见局面分析完成");
+  await expect(page.locator(".replay-technical-details")).toContainText(
+    "这一步已经检查完成",
+  );
   await expect(page.locator(".replay-technical-details")).not.toContainText(
     /COMPLETE|PARTIAL|CONTRADICTION|SINGLE_|SUBSET_|GLOBAL_|CSP_/u,
   );
-  await page.getByRole("button", { name: "展开完整时间线" }).click();
+  await clickReplayControlWithoutPageDrift(
+    page,
+    page.getByRole("button", { name: "查看每一步" }),
+  );
   await expect(page.locator(".replay-timeline li")).toHaveCount(2);
   await expect(page.locator(".replay-timeline")).toContainText("第 1 步");
   await expect(page.locator(".replay-timeline")).not.toContainText(/REVEAL|MINE|proof|证明/);
@@ -389,18 +467,18 @@ test("复盘中的问题可直接启动同规格专项练习", async ({ page }) 
   const mineIndex = generated.mines.findIndex((value) => value === 1);
   await clickBoardCell(page, 40, 9, 9);
   await clickBoardCell(page, mineIndex, 9, 9);
-  await page.getByRole("link", { name: "分析本局" }).click();
-  await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
+  await page.getByRole("link", { name: "复盘本局" }).click();
+  await expect(page.getByRole("heading", { name: "本局复盘" })).toBeVisible();
 
-  const targetedPractice = page.getByRole("link", { name: "进入对应专项练习" }).first();
+  const targetedPractice = page.getByRole("link", { name: "练习这类问题" }).first();
   await expect(targetedPractice).toBeVisible();
   await targetedPractice.click();
 
   await expect(page).toHaveURL(/#\/solo\/practice\?/u);
   await expect(page.getByText("引导练习", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/u })).toBeVisible();
-  await expect(page.locator(".practice-launch-context")).toContainText("针对上一局第");
-  await expect(page.locator(".practice-launch-context")).toContainText("新棋盘与原局不同");
+  await expect(page.locator(".practice-launch-context")).toContainText(/上一局第 \d+ 步/);
+  await expect(page.locator(".practice-launch-context")).toContainText("棋盘会换成新的");
   await expect(page.getByText("练习记录 · 不计成绩", { exact: true }).first()).toBeVisible();
   await expect.poll(() => page.evaluate(() =>
     localStorage.getItem("hms-guided-practice-started-v1"),
@@ -409,8 +487,8 @@ test("复盘中的问题可直接启动同规格专项练习", async ({ page }) 
 
 test("畸形专项练习地址不会应用无效棋盘配置", async ({ page }) => {
   await page.goto("/#/solo/practice?source=bad%20id&w=999&h=9&m=10&step=0&error=WRONG_FLAG&mode=classic");
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "开始对局" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "开始游戏" })).toBeVisible();
   await expect(page.getByRole("grid", { name: /扫雷棋盘/u })).toHaveCount(0);
 });
 
@@ -431,28 +509,28 @@ test("确定性棋盘可完成胜局并写入历史", async ({ page }) => {
   for (let index = 0; index < generated.mines.length; index += 1) {
     if (generated.mines[index] === 0) {
       await clickBoardCell(page, index, 9, 9);
-      if (await page.getByRole("heading", { name: "棋盘完成" }).count()) {
+      if (await page.getByRole("heading", { name: "完成" }).count()) {
         break;
       }
     }
   }
-  await expect(page.getByRole("heading", { name: "棋盘完成" })).toBeVisible();
-  await page.getByRole("button", { name: "展开历史 · 1" }).click();
+  await expect(page.getByRole("heading", { name: "完成" })).toBeVisible();
+  await page.getByRole("button", { name: "查看记录 · 1" }).click();
   await expect(page.locator(".solo-history-list article")).toContainText("完成");
-  await page.getByRole("link", { name: "分析本局" }).click();
-  await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
+  await page.getByRole("link", { name: "复盘本局" }).click();
+  await expect(page.getByRole("heading", { name: "本局复盘" })).toBeVisible();
   await expect(page.locator(".replay-review-shell")).not.toContainText("这里不该点");
   await expect(page.locator(".replay-review-shell")).not.toContainText("复盘数据存在矛盾");
-  await expect(page.getByRole("link", { name: "进入对应专项练习" })).toHaveCount(0);
-  await expect(page.getByText(/默认隐藏.*终局答案/)).toBeVisible();
-  await page.getByRole("button", { name: "查看终局揭晓" }).click();
+  await expect(page.getByRole("link", { name: "练习这类问题" })).toHaveCount(0);
+  await expect(page.getByText(/完整棋盘默认隐藏.*最后的答案/)).toBeVisible();
+  await page.getByRole("button", { name: "查看完整棋盘" }).click();
   await expect(page.getByText(/最终是(雷|安全格)/)).toBeVisible();
 });
 
 test("畸形复盘地址进入错误页而不是让应用崩溃", async ({ page }) => {
   await page.goto("/#/solo/replay/%E0%A4%A");
-  await expect(page.getByRole("heading", { name: "终局复盘" })).toBeVisible();
-  await expect(page.getByText("找不到这条本地记录。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "本局复盘" })).toBeVisible();
+  await expect(page.getByText("找不到这局游戏的记录。")).toBeVisible();
   await expect(page.getByRole("button", { name: "返回", exact: true })).toBeVisible();
 });
 
@@ -471,13 +549,13 @@ test("无猜生成超过五秒后回退，不制造终局记录", async ({ page 
   });
   await enterSoloSetup(page);
   await page.getByRole("button", { name: "无猜模式" }).click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await clickBoardCell(page, 40, 9, 9);
-  await expect(page.getByText("生成无猜棋盘")).toBeVisible();
+  await expect(page.getByText("正在准备无猜棋盘").first()).toBeVisible();
   await expect(
-    page.getByText(/无猜生成超过 5 秒/),
+    page.getByText(/无猜棋盘准备时间太长/),
   ).toBeVisible({ timeout: 9_000 });
-  await page.getByRole("button", { name: "展开历史 · 0" }).click();
+  await page.getByRole("button", { name: "查看记录 · 0" }).click();
   await expect(page.locator(".solo-history-list article")).toHaveCount(0);
 });
 
@@ -554,12 +632,12 @@ test("旧版 PB 幂等迁移为独立元数据，坏值可恢复且不进入趋�
   );
   await enterSolo(page);
 
-  await expect(page.getByText(/已将 1 条旧版 PB 保留为只读参考/)).toBeVisible();
-  await expect(page.getByText(/检测到 1 条损坏的旧版 PB 数据/)).toBeVisible();
-  await page.getByRole("button", { name: "展开历史 · 1" }).click();
-  await expect(page.getByText("旧版 PB 参考")).toBeVisible();
+  await expect(page.getByText(/已保留 1 条旧版最佳成绩作为参考/)).toBeVisible();
+  await expect(page.getByText(/发现 1 条损坏的旧版最佳成绩/)).toBeVisible();
+  await page.getByRole("button", { name: "查看记录 · 1" }).click();
+  await expect(page.getByText("旧版最佳成绩", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("可比较记录").locator("..").locator("strong"),
+    page.getByText("可以比较的游戏").locator("..").locator("strong"),
   ).toHaveText("0");
   await expect(page.locator(".solo-history-list article")).toHaveCount(0);
 
@@ -625,17 +703,17 @@ test("旧版 PB 幂等迁移为独立元数据，坏值可恢复且不进入趋�
   ).toEqual({ valid: validRaw, invalid: invalidRaw });
 
   const recoveryDownloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "导出旧 PB 恢复数据" }).click();
+  await page.getByRole("button", { name: "导出旧版最佳成绩" }).click();
   const recoveryDownload = await recoveryDownloadPromise;
   expect(recoveryDownload.suggestedFilename()).toMatch(
     /^h-minesweeper-solo-legacy-pb-recovery-\d{4}-\d{2}-\d{2}\.json$/,
   );
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
-  await page.getByRole("button", { name: "开始对局" }).click();
-  await expect(page.getByRole("heading", { name: "经典扫雷" })).toBeVisible();
-  await expect(page.getByText(/已将 1 条旧版 PB 保留为只读参考/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "扫雷" })).toBeVisible();
+  await expect(page.getByText(/已保留 1 条旧版最佳成绩作为参考/)).toBeVisible();
   const secondMetadata = await page.evaluate(async () => {
     return await new Promise<Record<string, unknown>[]>((resolve, reject) => {
       const request = indexedDB.open("h-minesweeper-solo-history-v1");
@@ -681,15 +759,15 @@ test("损坏历史保留原文并从趋势中隔离", async ({ page }) => {
     });
   });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(
-    page.getByText(/检测到 1 条损坏或未知版本记录/),
+    page.getByText(/发现 1 条损坏或无法识别的记录/),
   ).toBeVisible();
-  await page.getByRole("button", { name: "展开历史 · 1" }).click();
+  await page.getByRole("button", { name: "查看记录 · 1" }).click();
   await expect(page.getByRole("button", { name: "导出恢复数据" })).toBeVisible();
   await expect(
-    page.getByText("可比较记录").locator("..").locator("strong"),
+    page.getByText("可以比较的游戏").locator("..").locator("strong"),
   ).toHaveText("0");
 });
 
@@ -713,10 +791,10 @@ test("IndexedDB 不可用时游戏继续且明确标记本局未保存", async (
   const mineIndex = generated.mines.findIndex((value) => value === 1);
   await clickBoardCell(page, 40, 9, 9);
   await clickBoardCell(page, mineIndex, 9, 9);
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
   await expect(
     page.locator(".solo-history-save-error").getByText(
-      /浏览器存储.*未保存到历史/,
+      /浏览器存储不可用.*这局成绩没有保存/,
     ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "重试保存" })).toBeVisible();

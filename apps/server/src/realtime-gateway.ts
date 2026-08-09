@@ -316,7 +316,7 @@ export class RealtimeGateway {
           type: "ERROR",
           v: PROTOCOL_VERSION,
           code: "UPGRADE_REQUIRED",
-          message: "旧版实时入口已停用，请刷新或升级客户端。",
+          message: "当前页面版本已经停用，请刷新或更新后重试。",
           retryable: false,
         });
         socket.close(4406, "Upgrade required");
@@ -332,7 +332,7 @@ export class RealtimeGateway {
             type: "ERROR",
             v: PROTOCOL_VERSION,
             code: "UPGRADE_REQUIRED",
-            message: "客户端协议版本过旧，请刷新或升级后重试。",
+            message: "当前页面版本过旧，请刷新或更新后重试。",
             retryable: false,
           });
           socket.close(4406, "Upgrade required");
@@ -370,7 +370,7 @@ export class RealtimeGateway {
           ? "UPGRADE_REQUIRED"
           : "INVALID_PROTOCOL_MESSAGE",
         message: unsupportedVersion
-          ? "客户端协议版本过旧，请刷新或升级后重试。"
+          ? "当前页面版本过旧，请刷新或更新后重试。"
           : "Invalid realtime protocol message",
         retryable: false,
       });

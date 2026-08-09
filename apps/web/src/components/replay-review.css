@@ -1,4 +1,4 @@
-.replay-review-shell { width: min(1080px, calc(100% - 32px)); margin: 28px auto; }
+.replay-review-shell { width: min(1080px, calc(100% - 32px)); margin: 28px auto; overflow-anchor: none; }
 .replay-review-shell > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .replay-review-status, .replay-review-summary, .replay-moment-list article { margin-top: 18px; padding: 18px; border: 1px solid var(--line); background: var(--panel); }
 .replay-review-status.is-error { border-color: #b64c5c; }

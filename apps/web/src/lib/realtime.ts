@@ -54,7 +54,7 @@ export function decodeRealtimePayload(payload: string): ServerMessage {
       type: "ERROR",
       v: PROTOCOL_VERSION,
       code: "INVALID_PROTOCOL_MESSAGE",
-      message: "收到无法解析的实时消息，已忽略且未推进状态。",
+      message: "收到了一条无法识别的比赛更新，已安全忽略。",
       retryable: true,
     };
   }
@@ -63,7 +63,7 @@ export function decodeRealtimePayload(payload: string): ServerMessage {
       type: "ERROR",
       v: PROTOCOL_VERSION,
       code: "UPGRADE_REQUIRED",
-      message: "实时协议版本不兼容，请刷新或升级客户端。",
+      message: "当前页面版本与服务器不兼容，请刷新或更新后重试。",
       retryable: false,
     };
   }
@@ -71,7 +71,7 @@ export function decodeRealtimePayload(payload: string): ServerMessage {
     type: "ERROR",
     v: PROTOCOL_VERSION,
     code: "INVALID_PROTOCOL_MESSAGE",
-    message: "收到不符合协议的实时消息，已忽略且未推进状态。",
+    message: "收到了一条格式不正确的比赛更新，已安全忽略。",
     retryable: true,
   };
 }
@@ -183,7 +183,7 @@ export class RealtimeClient {
         onStatus("disconnected");
         if (!settled) {
           settled = true;
-          reject(new Error("实时票据无效或连接在认证前关闭"));
+          reject(new Error("比赛连接已过期，或在验证完成前断开"));
         }
       });
 
@@ -192,7 +192,7 @@ export class RealtimeClient {
         onStatus("error");
         if (!settled) {
           settled = true;
-          reject(new Error("实时连接失败"));
+          reject(new Error("比赛连接失败"));
         }
       });
     });

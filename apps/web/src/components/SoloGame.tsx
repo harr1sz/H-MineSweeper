@@ -1,5 +1,6 @@
 import {
   CELL_FLAGGED,
+  CELL_QUESTIONED,
   calculate3BV,
   calculateCPS,
   calculateGameMetrics,
@@ -7,6 +8,7 @@ import {
   countBoardActions,
   createBoard,
   createGameState,
+  cycleCellMark,
   getNeighborIndices,
   getProgress,
   hashBoard,
@@ -76,7 +78,9 @@ import {
   resolveSoloLaunchPreferences,
   saveSoloPreferences,
   type SoloPreferencesV1,
+  type SoloTimerFormatPreference,
 } from "../lib/solo-preferences";
+import { formatSoloElapsedTime } from "../lib/solo-time";
 import {
   metricValuesForHistoryRecord,
   resolveSoloMetricView,
@@ -111,6 +115,7 @@ import {
 } from "../lib/practice-history";
 import {
   CanvasBoard,
+  resolveBoardPalette,
   type BoardAction,
   type BoardActionVisual,
   type BoardEffectsProfile,
@@ -142,6 +147,17 @@ interface RecordActionOptions {
   readonly physicalClicks?: number;
   readonly comboActor?: SoloComboActor;
   readonly actionAt?: number;
+  readonly replayElapsedMs?: number;
+}
+
+interface PracticePreMineSnapshot {
+  readonly game: GameState;
+  readonly actionCount: number;
+  readonly practiceEventCount: number;
+  readonly practiceEventsOverflow: boolean;
+  readonly lastReplayStateHash: string;
+  readonly elapsedMs: number;
+  readonly effectiveInteractionMs: number;
 }
 
 export const PRACTICE_COACH_IDLE_MS = 8_000;
@@ -375,14 +391,6 @@ const PRESET_KEYS: readonly Exclude<SoloPreset, "custom">[] = [
   "expert",
 ];
 
-function formatSoloTime(elapsedMs: number): string {
-  const centiseconds = Math.floor(Math.max(0, elapsedMs) / 10);
-  const minutes = Math.floor(centiseconds / 6_000);
-  const seconds = Math.floor((centiseconds % 6_000) / 100);
-  const fraction = centiseconds % 100;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(fraction).padStart(2, "0")}`;
-}
-
 function applyFlagsByIndex(
   flaggedIndexes: readonly number[],
   target: GameState,
@@ -392,6 +400,26 @@ function applyFlagsByIndex(
       target.visibility[index] = CELL_FLAGGED;
     }
   }
+}
+
+function applyQuestionsByIndex(
+  questionedIndexes: readonly number[],
+  target: GameState,
+): void {
+  for (const index of questionedIndexes) {
+    if (index >= 0 && index < target.visibility.length) {
+      target.visibility[index] = CELL_QUESTIONED;
+    }
+  }
+}
+
+function cloneGameState(state: GameState): GameState {
+  return {
+    board: state.board,
+    visibility: new Uint8Array(state.visibility),
+    revealedSafeCount: state.revealedSafeCount,
+    outcome: state.outcome,
+  };
 }
 
 function classifyHistoryFailure(error: unknown): string {
@@ -419,7 +447,7 @@ export function SoloGame({
   reducedMotion,
   onExit,
 }: SoloGameProps) {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const configErrorDescriptor = useCallback((nextConfig: SoloBoardConfig): MessageDescriptor | null => {
     const error = getSoloConfigErrorCode(nextConfig);
     if (!error) return null;
@@ -471,6 +499,7 @@ export function SoloGame({
   const practiceStartedAtRef = useRef<number | null>(null);
   const practiceSavedRunRef = useRef("");
   const practiceUsedAutoMarkRef = useRef(false);
+  const practicePreMineSnapshotRef = useRef<PracticePreMineSnapshot | null>(null);
   const autoMarkMinesRef = useRef(false);
   const visualSequenceRef = useRef(0);
   const comboStateRef = useRef(createSoloComboState());
@@ -480,7 +509,9 @@ export function SoloGame({
   const lastReplayStateHashRef = useRef(hashGameState(initialGame));
   const replayTruncationReasonRef = useRef<"ACTION_LIMIT" | "BYTE_LIMIT" | null>(null);
   const initialFlagsRef = useRef<readonly number[]>([]);
+  const initialQuestionsRef = useRef<readonly number[]>([]);
   const boardSpecRef = useRef<BoardSpec | null>(null);
+  const pendingReplaySpecRef = useRef<BoardSpec | null>(null);
   const historyStoreRef = useRef(createIndexedDbSoloHistoryStore());
   const practiceHistoryStoreRef = useRef(createIndexedDbPracticeHistoryStore());
   const runIdentityRef = useRef<SoloRunIdentity | null>(null);
@@ -527,6 +558,12 @@ export function SoloGame({
   );
   const [boardTheme, setBoardTheme] = useState<BoardTheme>(
     launchPreferences.boardTheme,
+  );
+  const [questionMarksEnabled, setQuestionMarksEnabled] = useState(
+    launchPreferences.questionMarksEnabled,
+  );
+  const [timerFormat, setTimerFormat] = useState<SoloTimerFormatPreference>(
+    launchPreferences.timerFormat,
   );
   const [legacyPersonalBestMs, setLegacyPersonalBestMs] =
     useState<number | null>(null);
@@ -785,6 +822,7 @@ export function SoloGame({
       practiceStartedAtRef.current = null;
       practiceSavedRunRef.current = "";
       practiceUsedAutoMarkRef.current = false;
+      practicePreMineSnapshotRef.current = null;
       practiceManualHintPendingRef.current = false;
       practiceLastInteractionAtRef.current = null;
       practiceShownStateHashesRef.current.clear();
@@ -794,7 +832,9 @@ export function SoloGame({
       autoFlaggedIndexesRef.current.clear();
       autoMarkMinesRef.current = false;
       initialFlagsRef.current = [];
+      initialQuestionsRef.current = [];
       boardSpecRef.current = null;
+      pendingReplaySpecRef.current = null;
       runIdentityRef.current = null;
       runCompletedAtRef.current = null;
       historyEnqueuedRunRef.current = "";
@@ -933,8 +973,8 @@ export function SoloGame({
       } else if (replayActionTraceRef.current.length < SOLO_REPLAY_MAX_ACTIONS) {
         replayActionTraceRef.current.push({
           seq: replayActionTraceRef.current.length + 1,
-          elapsedMs:
-            startedAt === null ? 0 : Math.max(0, actionAt - startedAt),
+          elapsedMs: options.replayElapsedMs ??
+            (startedAt === null ? 0 : Math.max(0, actionAt - startedAt)),
           actionType,
           cellIndex: originIndex,
           physicalClicks,
@@ -959,6 +999,7 @@ export function SoloGame({
         changedIndexes: [
           ...delta.revealed.map((cell) => cell.index),
           ...(delta.flagged === undefined ? [] : [delta.flagged.index]),
+          ...(delta.questioned === undefined ? [] : [delta.questioned.index]),
         ],
         accepted: delta.accepted,
         revealedSafeCount: safeReveals,
@@ -994,8 +1035,15 @@ export function SoloGame({
       } = {},
     ) => {
       const next = createGameState(createBoard(spec));
+      const questionedIndexes = Array.from(
+        gameRef.current.visibility,
+        (visibility, index) =>
+          visibility === CELL_QUESTIONED ? index : -1,
+      ).filter((index) => index >= 0);
       applyFlagsByIndex(flaggedIndexes, next);
+      applyQuestionsByIndex(questionedIndexes, next);
       initialFlagsRef.current = [...new Set(flaggedIndexes)].sort((a, b) => a - b);
+      initialQuestionsRef.current = [...new Set(questionedIndexes)].sort((a, b) => a - b);
       boardSpecRef.current = Object.freeze({ ...spec });
       const beganAt = performance.now();
       const nextRunIdentity = sessionKind === "GUIDED_PRACTICE"
@@ -1057,6 +1105,7 @@ export function SoloGame({
           physicalClicks: options.physicalClicks ?? 1,
           comboActor: "PLAYER",
           actionAt: beganAt,
+          replayElapsedMs: 0,
         },
       );
       return next.outcome;
@@ -1303,7 +1352,8 @@ export function SoloGame({
 
       if (status === "READY") {
         if (action === "TOGGLE_FLAG") {
-          toggleFlag(current, cellIndex);
+          if (questionMarksEnabled) cycleCellMark(current, cellIndex);
+          else toggleFlag(current, cellIndex);
           setRevision((value) => value + 1);
           setNotice({ id: "solo.initialFlags" });
           return;
@@ -1323,6 +1373,20 @@ export function SoloGame({
           (visibility, index) =>
             visibility === CELL_FLAGGED ? index : -1,
         ).filter((index) => index >= 0);
+        const pendingReplaySpec = pendingReplaySpecRef.current;
+        if (pendingReplaySpec !== null) {
+          pendingReplaySpecRef.current = null;
+          const outcome = beginGame(
+            pendingReplaySpec,
+            cellIndex,
+            flaggedIndexes,
+            { physicalClicks },
+          );
+          if (outcome === "PLAYING") {
+            setNotice({ id: "solo.sameBoardPlaying" });
+          }
+          return;
+        }
         if (config.mode === "no_guess") {
           generateNoGuess(cellIndex, flaggedIndexes, physicalClicks);
           return;
@@ -1342,6 +1406,17 @@ export function SoloGame({
       }
 
       const actionAt = performance.now();
+      const practicePreActionSnapshot = sessionKind === "GUIDED_PRACTICE"
+        ? {
+            game: cloneGameState(current),
+            actionCount: actionTraceRef.current.length,
+            practiceEventCount: practiceEventsRef.current.length,
+            practiceEventsOverflow: practiceEventsOverflowRef.current,
+            lastReplayStateHash: lastReplayStateHashRef.current,
+            elapsedMs: startedAt === null ? 0 : Math.max(0, actionAt - startedAt),
+            effectiveInteractionMs: effectiveInteractionAccumulatedMsRef.current,
+          } satisfies PracticePreMineSnapshot
+        : null;
       recordEffectiveInteraction(actionAt);
       if (sessionKind === "GUIDED_PRACTICE") {
         practiceLastInteractionAtRef.current = actionAt;
@@ -1352,15 +1427,17 @@ export function SoloGame({
         ? visibleBoardStateForPractice(current, autoFlaggedIndexesRef.current)
         : null;
       const suggestionBefore = coachAnalysisRef.current;
-      const expectedCoachAction: CoachAction = action === "TOGGLE_FLAG"
+      const expectedCoachAction: CoachAction | null = action === "TOGGLE_FLAG"
         ? current.visibility[cellIndex] === CELL_FLAGGED
           ? "UNFLAG"
-          : "FLAG"
+          : current.visibility[cellIndex] === CELL_QUESTIONED && questionMarksEnabled
+            ? null
+            : "FLAG"
         : "REVEAL";
       const followedProof = visibleBefore !== null && suggestionBefore !== null &&
         (action === "CHORD"
           ? isCoachChordProven(suggestionBefore, visibleBefore, cellIndex)
-          : isCoachActionProven(
+          : expectedCoachAction !== null && isCoachActionProven(
             suggestionBefore,
             visibleBefore,
             expectedCoachAction,
@@ -1375,9 +1452,14 @@ export function SoloGame({
         action === "REVEAL"
           ? revealCell(current, cellIndex)
           : action === "TOGGLE_FLAG"
-            ? toggleFlag(current, cellIndex)
+            ? questionMarksEnabled
+              ? cycleCellMark(current, cellIndex)
+              : toggleFlag(current, cellIndex)
             : chordCell(current, cellIndex);
       const postStateHash = hashGameState(current);
+      if (delta.hitMine === true && practicePreActionSnapshot !== null) {
+        practicePreMineSnapshotRef.current = practicePreActionSnapshot;
+      }
       recordAction(
         action,
         cellIndex,
@@ -1408,7 +1490,7 @@ export function SoloGame({
               ? "practice.feedback.safeUnproven"
               : "practice.feedback.notEvaluated",
           });
-        } else if (action === "TOGGLE_FLAG") {
+        } else if (action === "TOGGLE_FLAG" && expectedCoachAction !== null) {
           setNotice({
             id: coachAnalysisWasConclusive
               ? "practice.feedback.flagUnproven"
@@ -1419,6 +1501,7 @@ export function SoloGame({
           !followedProof &&
           !coachAnalysisWasConclusive &&
           visibleBefore !== null &&
+          expectedCoachAction !== null &&
           (action === "TOGGLE_FLAG" || (
             delta.hitMine !== true &&
             delta.revealed.some(({ value }) => value >= 0)
@@ -1442,11 +1525,13 @@ export function SoloGame({
       config,
       finishIfTerminal,
       generateNoGuess,
+      questionMarksEnabled,
       recordEffectiveInteraction,
       recordAction,
       replaceGame,
       resolvePracticeActionFeedback,
       sessionKind,
+      startedAt,
       status,
     ],
   );
@@ -2023,6 +2108,8 @@ export function SoloGame({
     nextPreset: SoloPreset,
     nextStatsLevel: StatsLevel = statsLevel,
     nextBoardTheme: BoardTheme = boardTheme,
+    nextQuestionMarksEnabled: boolean = questionMarksEnabled,
+    nextTimerFormat: SoloTimerFormatPreference = timerFormat,
   ) => {
     const preferences: SoloPreferencesV1 = {
       schemaVersion: SOLO_PREFERENCES_SCHEMA_VERSION,
@@ -2030,6 +2117,8 @@ export function SoloGame({
       config: nextConfig,
       statsLevel: nextStatsLevel,
       boardTheme: nextBoardTheme,
+      questionMarksEnabled: nextQuestionMarksEnabled,
+      timerFormat: nextTimerFormat,
     };
     try {
       saveSoloPreferences(preferences);
@@ -2050,11 +2139,102 @@ export function SoloGame({
     persistPreferences(config, preset, statsLevel, next);
   };
 
+  const chooseQuestionMarks = (next: boolean) => {
+    setQuestionMarksEnabled(next);
+    persistPreferences(config, preset, statsLevel, boardTheme, next, timerFormat);
+  };
+
+  const chooseTimerFormat = (next: SoloTimerFormatPreference) => {
+    setTimerFormat(next);
+    persistPreferences(
+      config,
+      preset,
+      statsLevel,
+      boardTheme,
+      questionMarksEnabled,
+      next,
+    );
+  };
+
   useEffect(() => {
     if (initialGenerationMode !== undefined) {
       persistPreferences(initialConfig, initialPreset);
     }
   }, []);
+
+  const replaySameBoard = () => {
+    const currentSpec = boardSpecRef.current;
+    if (
+      sessionKind !== "STANDARD" ||
+      (status !== "WON" && status !== "LOST") ||
+      currentSpec === null
+    ) {
+      return;
+    }
+    const replaySpec = Object.freeze({ ...currentSpec });
+    resetBoard(config, preset, "STANDARD");
+    pendingReplaySpecRef.current = replaySpec;
+    replaceGame(createGameState(createBoard(replaySpec)));
+    setNotice({ id: "solo.sameBoardStarted" });
+  };
+
+  const rewindPracticeBeforeMine = () => {
+    const snapshot = practicePreMineSnapshotRef.current;
+    if (
+      sessionKind !== "GUIDED_PRACTICE" ||
+      status !== "LOST" ||
+      practiceSaveState === "SAVING" ||
+      snapshot === null
+    ) {
+      return;
+    }
+    cancelGeneration();
+    cancelCoachAnalysis();
+    cancelCoachFeedbackAnalysis();
+    const now = performance.now();
+    const rebasedStartedAt = now - snapshot.elapsedMs;
+    const restoredGame = cloneGameState(snapshot.game);
+    actionTraceRef.current = actionTraceRef.current.slice(0, snapshot.actionCount);
+    practiceEventsRef.current = practiceEventsRef.current.slice(
+      0,
+      snapshot.practiceEventCount,
+    );
+    practiceEventsOverflowRef.current = snapshot.practiceEventsOverflow;
+    lastReplayStateHashRef.current = snapshot.lastReplayStateHash;
+    practiceStartedAtRef.current = rebasedStartedAt;
+    practiceLastInteractionAtRef.current = now;
+    practiceManualHintPendingRef.current = false;
+    practiceShownStateHashesRef.current.clear();
+    practiceAutoMarkEvidenceHashRef.current = null;
+    practiceAutoMarkExplanationRef.current = false;
+    practiceSavedRunRef.current = "";
+    practicePreMineSnapshotRef.current = null;
+    runIdentityRef.current = {
+      runId: globalThis.crypto.randomUUID(),
+      trainingSessionId: globalThis.crypto.randomUUID(),
+    };
+    runCompletedAtRef.current = null;
+    historyEnqueuedRunRef.current = "";
+    effectiveInteractionAccumulatedMsRef.current = snapshot.effectiveInteractionMs;
+    lastEffectiveInteractionAtRef.current = now;
+    runEffectiveInteractionMsRef.current = 0;
+    setStartedAt(rebasedStartedAt);
+    setFinishedAt(null);
+    setClockNow(now);
+    setStatus("PLAYING");
+    setActionBreakdown(countBoardActions(actionTraceRef.current));
+    setActionVisual(undefined);
+    clearCombo();
+    setCurrentCoachAnalysis(null);
+    setDisplayedCoachSuggestion(null);
+    setCoachTransportError(false);
+    setCoachIdleSeconds(8);
+    setPracticeSaveState("IDLE");
+    setShowPracticeHistory(false);
+    setTerminalDetonatedIndex(undefined);
+    replaceGame(restoredGame);
+    setNotice({ id: "practice.result.rewindNotice" });
+  };
 
   const flags = countFlags(game);
   const elapsedMs =
@@ -2074,6 +2254,8 @@ export function SoloGame({
   });
   const { threeBvPerSecond, ioe } = metricView;
   const currentRunId = runIdentityRef.current?.runId ?? "";
+  const canRewindPractice = sessionKind === "GUIDED_PRACTICE" &&
+    status === "LOST" && practicePreMineSnapshotRef.current !== null;
   const currentHistoryPending = sessionKind === "STANDARD" &&
     getPendingHistoryWrites().some(
       ({ record }) => record.recordId === currentRunId,
@@ -2116,6 +2298,8 @@ export function SoloGame({
       schemaVersion: PRACTICE_REPLAY_SCHEMA_VERSION,
       recordId: runIdentity.runId,
       initialFlags: initialFlagsRef.current,
+      initialQuestions: initialQuestionsRef.current,
+      questionMarksEnabled,
       events,
     };
     const replayBytes = new TextEncoder().encode(JSON.stringify(replay)).byteLength;
@@ -2259,6 +2443,8 @@ export function SoloGame({
       schemaVersion: SOLO_REPLAY_SCHEMA_VERSION,
       recordId: runId,
       initialFlags: initialFlagsRef.current,
+      initialQuestions: initialQuestionsRef.current,
+      questionMarksEnabled,
       actions: replayActions,
     };
     const encoder = new TextEncoder();
@@ -2620,6 +2806,55 @@ export function SoloGame({
                 <small>5–100 / ≤10K</small>
               </button>
             </div>
+
+            {preset === "custom" && (
+              <div
+                className="solo-custom-settings"
+                role="group"
+                aria-label={t("solo.customSettings")}
+              >
+                <div className="solo-custom-grid">
+                  <label>
+                    <span>{t("solo.width")}</span>
+                    <input
+                      aria-label={t("solo.customWidth")}
+                      inputMode="numeric"
+                      max="100"
+                      min="5"
+                      type="number"
+                      value={draftWidth}
+                      onChange={(event) => setDraftWidth(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("solo.height")}</span>
+                    <input
+                      aria-label={t("solo.customHeight")}
+                      inputMode="numeric"
+                      max="100"
+                      min="5"
+                      type="number"
+                      value={draftHeight}
+                      onChange={(event) => setDraftHeight(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("solo.mines")}</span>
+                    <input
+                      aria-label={t("solo.customMines")}
+                      inputMode="numeric"
+                      min="1"
+                      type="number"
+                      value={draftMines}
+                      onChange={(event) => setDraftMines(event.target.value)}
+                    />
+                  </label>
+                  <button className="secondary-button" type="button" onClick={applyCustom}>
+                    {t("solo.validateCustom")}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="solo-setup-section">
@@ -2648,107 +2883,140 @@ export function SoloGame({
             </div>
           </div>
 
-          <details className="solo-setup-advanced" open={preset === "custom" ? true : undefined}>
-            <summary>{t("solo.advancedSettings")}</summary>
-            {preset === "custom" && (
-              <div className="solo-custom-grid is-enabled">
-                <label>
-                  <span>{t("solo.width")}</span>
-                  <input
-                    aria-label={t("solo.customWidth")}
-                    inputMode="numeric"
-                    max="100"
-                    min="5"
-                    type="number"
-                    value={draftWidth}
-                    onChange={(event) => setDraftWidth(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>{t("solo.height")}</span>
-                  <input
-                    aria-label={t("solo.customHeight")}
-                    inputMode="numeric"
-                    max="100"
-                    min="5"
-                    type="number"
-                    value={draftHeight}
-                    onChange={(event) => setDraftHeight(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>{t("solo.mines")}</span>
-                  <input
-                    aria-label={t("solo.customMines")}
-                    inputMode="numeric"
-                    min="1"
-                    type="number"
-                    value={draftMines}
-                    onChange={(event) => setDraftMines(event.target.value)}
-                  />
-                </label>
-                <button className="secondary-button" type="button" onClick={applyCustom}>
-                  {t("solo.validateCustom")}
-                </button>
+          <div className="solo-setup-section solo-display-preferences">
+            <div className="solo-setup-heading">
+              <span>04</span>
+              <div>
+                <strong>{t("solo.displayPreferences")}</strong>
+                <small>{t("solo.displayPreferencesHelp")}</small>
               </div>
-            )}
-            <div className="solo-setup-section solo-setup-section-split">
-            <div>
-              <div className="solo-setup-heading">
-                <span>04</span>
-                <div>
+            </div>
+
+            <div className="solo-preference-list">
+              <div className="solo-preference-row">
+                <div className="solo-preference-copy">
                   <strong>{t("solo.dataLevel")}</strong>
                   <small>{t("solo.dataLevelHelp")}</small>
                 </div>
+                <div className="solo-compact-tabs" role="group" aria-label={t("solo.dataLevelAria")}>
+                  {(
+                    [
+                      ["basic", t("solo.basic")],
+                      ["advanced", t("solo.advanced")],
+                      ["analysis", t("solo.details")],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      className={statsLevel === value ? "is-active" : ""}
+                      key={value}
+                      type="button"
+                      aria-pressed={statsLevel === value}
+                      onClick={() => chooseStatsLevel(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="solo-compact-tabs" role="group" aria-label={t("solo.dataLevelAria")}>
-                {(
-                  [
-                    ["basic", t("solo.basic")],
-                    ["advanced", t("solo.advanced")],
-                    ["analysis", t("solo.details")],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    className={statsLevel === value ? "is-active" : ""}
-                    key={value}
-                    type="button"
-                    aria-pressed={statsLevel === value}
-                    onClick={() => chooseStatsLevel(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="solo-setup-heading">
-                <span>05</span>
-                <div>
+
+              <div className="solo-preference-row solo-theme-row">
+                <div className="solo-preference-copy">
                   <strong>{t("solo.boardDisplay")}</strong>
                   <small>{t("solo.boardDisplayHelp")}</small>
                 </div>
-              </div>
-              <div className="solo-compact-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
-                {(
-                  [
-                    ["black-gold", t("solo.comfort")],
-                    ["classic", t("solo.professional")],
-                    ["high-contrast", t("solo.highContrast")],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    className={boardTheme === value ? "is-active" : ""}
-                    key={value}
-                    type="button"
-                    aria-pressed={boardTheme === value}
-                    onClick={() => chooseBoardTheme(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
+                <div className="solo-compact-tabs solo-theme-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
+                  {(
+                    [
+                      ["classic", t("solo.professional")],
+                      ["black-gold", t("solo.comfort")],
+                      ["high-contrast", t("solo.highContrast")],
+                      ["ivory-tactical", t("solo.ivoryTactical")],
+                    ] as const
+                  ).map(([value, label]) => {
+                    const palette = resolveBoardPalette(value);
+                    return (
+                      <button
+                        className={boardTheme === value ? "is-active" : ""}
+                        key={value}
+                        type="button"
+                        aria-pressed={boardTheme === value}
+                        onClick={() => chooseBoardTheme(value)}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="solo-theme-swatch"
+                          style={{
+                            background: `linear-gradient(135deg, ${palette.hiddenA} 0 50%, ${palette.revealed} 50% 100%)`,
+                            borderColor: palette.revealedLine,
+                            color: palette.numberColors[1],
+                          }}
+                        >
+                          1
+                        </span>
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
+          </div>
+
+          <details className="solo-advanced-settings">
+            <summary>
+              <span>{t("solo.advancedSettings")}</span>
+              <small>{t("solo.advancedSettingsHelp")}</small>
+            </summary>
+            <div className="solo-preference-list">
+              <div className="solo-preference-row">
+                <div className="solo-preference-copy">
+                  <strong>{t("solo.questionMarks")}</strong>
+                  <small>{t("solo.questionMarksHelp")}</small>
+                </div>
+                <div className="solo-compact-tabs solo-binary-tabs" role="group" aria-label={t("solo.questionMarksAria")}>
+                  <button
+                    className={!questionMarksEnabled ? "is-active" : ""}
+                    type="button"
+                    aria-pressed={!questionMarksEnabled}
+                    onClick={() => chooseQuestionMarks(false)}
+                  >
+                    {t("solo.off")}
+                  </button>
+                  <button
+                    className={questionMarksEnabled ? "is-active" : ""}
+                    type="button"
+                    aria-pressed={questionMarksEnabled}
+                    onClick={() => chooseQuestionMarks(true)}
+                  >
+                    {t("solo.on")}
+                  </button>
+                </div>
+              </div>
+
+              <div className="solo-preference-row">
+                <div className="solo-preference-copy">
+                  <strong>{t("solo.timerFormat")}</strong>
+                  <small>{t("solo.timerFormatHelp")}</small>
+                </div>
+                <div className="solo-compact-tabs solo-binary-tabs" role="group" aria-label={t("solo.timerFormatAria")}>
+                  <button
+                    className={timerFormat === "clock" ? "is-active" : ""}
+                    type="button"
+                    aria-pressed={timerFormat === "clock"}
+                    onClick={() => chooseTimerFormat("clock")}
+                  >
+                    {t("solo.timerClock")}
+                  </button>
+                  <button
+                    className={timerFormat === "seconds" ? "is-active" : ""}
+                    type="button"
+                    aria-pressed={timerFormat === "seconds"}
+                    onClick={() => chooseTimerFormat("seconds")}
+                  >
+                    {t("solo.timerSeconds")}
+                  </button>
+                </div>
+              </div>
             </div>
           </details>
 
@@ -2825,7 +3093,7 @@ export function SoloGame({
         >
           <div className="board-toolbar">
             <span>{t("solo.control.reveal")}</span>
-            <span>{t("solo.control.flag")}</span>
+            <span>{t(questionMarksEnabled ? "solo.control.mark" : "solo.control.flag")}</span>
             <span>{t("solo.control.chord")}</span>
             <span>{t(config.mode === "no_guess" ? "solo.mode.noGuess" : "solo.mode.classic")}</span>
             {sessionKind === "GUIDED_PRACTICE" && (
@@ -2845,6 +3113,7 @@ export function SoloGame({
               ? { ariaDescribedBy: "practice-coach-announcement" }
               : {})}
             boardTheme={boardTheme}
+            questionMarksEnabled={questionMarksEnabled}
             disabled={
               status === "GENERATING" || status === "WON" || status === "LOST"
             }
@@ -2964,7 +3233,7 @@ export function SoloGame({
             <section className="solo-terminal-panel" role="status" aria-live="assertive">
               <span className="panel-kicker">{t("solo.kicker.result")}</span>
               <h2>{t(status === "WON" ? "solo.result.won" : "solo.result.lost")}</h2>
-              <p>{formatSoloTime(elapsedMs)} · {t("solo.resultActions", { count: actionBreakdown.semanticActions })}</p>
+              <p>{formatSoloElapsedTime(elapsedMs, timerFormat, locale)} · {t("solo.resultActions", { count: actionBreakdown.semanticActions })}</p>
               {sessionKind === "GUIDED_PRACTICE" ? (
                 <div className="solo-result-metrics practice-result-metrics">
                   <span>{t("practice.notScored")}</span>
@@ -2974,9 +3243,9 @@ export function SoloGame({
               ) : (
                 <div className="solo-result-metrics">
                   <span>{t(isNewPersonalBest ? "solo.newPersonalBestLocal" : "solo.localUnverified")}</span>
-                  <b>3BV {board3BV ?? "—"}</b>
-                  <b>3BV/s {formatMetric(threeBvPerSecond)}</b>
-                  <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
+                  <b>{t("solo.boardComplexity")} {board3BV ?? "—"}</b>
+                  <b>{t("solo.clearSpeed")} {formatMetric(threeBvPerSecond)}</b>
+                  <b>{t("solo.efficiency")} {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
                   {status === "LOST" && <small>{t("solo.completionMetricUnavailable")}</small>}
                 </div>
               )}
@@ -2987,13 +3256,22 @@ export function SoloGame({
                 <span>{t("solo.legend.wrongFlag")}</span>
               </div>
               <div className="result-actions">
+                {canRewindPractice && practiceSaveState !== "SAVING" && (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={rewindPracticeBeforeMine}
+                  >
+                    {t("practice.result.rewind")}
+                  </button>
+                )}
                 {sessionKind === "GUIDED_PRACTICE" ? (
                   practiceSaveState === "SAVING" ? (
                     <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
                   ) : practiceSaveState === "SAVED" ? (
-                    <a className="primary-button" href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("practice.result.reviewReplay")}</a>
+                    <a className={canRewindPractice ? "secondary-button" : "primary-button"} href={`#/solo/practice/replay/${encodeURIComponent(currentRunId)}`}>{t("practice.result.reviewReplay")}</a>
                   ) : (
-                    <button className="primary-button" type="button" onClick={reviewFinalBoard}>{t("practice.result.reviewBoard")}</button>
+                    <button className={canRewindPractice ? "secondary-button" : "primary-button"} type="button" onClick={reviewFinalBoard}>{t("practice.result.reviewBoard")}</button>
                   )
                 ) : currentHistoryPending ? (
                   <button className="primary-button" type="button" disabled>{t("solo.savingReplay")}</button>
@@ -3007,6 +3285,9 @@ export function SoloGame({
                   <button className="secondary-button" type="button" onClick={openPracticeHistory}>{t("practice.result.history")}</button>
                 )}
                 {sessionKind === "STANDARD" && (
+                  <button className="secondary-button" type="button" onClick={replaySameBoard}>{t("solo.replaySameBoard")}</button>
+                )}
+                {sessionKind === "STANDARD" && (
                   <button className="secondary-button" type="button" onClick={() => resetBoard()}>{t("solo.sameBoard")}</button>
                 )}
                 <button className="secondary-button" type="button" onClick={exitSolo}>{t("solo.home")}</button>
@@ -3018,7 +3299,7 @@ export function SoloGame({
             <strong>{statusLabel}</strong>
             <i className={`solo-status-dot status-${status.toLowerCase()}`} />
           </div>
-          <div className="solo-clock">{formatSoloTime(elapsedMs)}</div>
+          <div className="solo-clock">{formatSoloElapsedTime(elapsedMs, timerFormat, locale)}</div>
 
           <div className="solo-stats">
             <div>
@@ -3047,14 +3328,14 @@ export function SoloGame({
                 <strong>
                   {currentRulesPersonalBestMs === null
                     ? "—"
-                    : formatSoloTime(currentRulesPersonalBestMs)}
+                    : formatSoloElapsedTime(currentRulesPersonalBestMs, timerFormat, locale)}
                 </strong>
               </div>
             )}
             {sessionKind === "STANDARD" && legacyPersonalBestMs !== null && (
               <div>
                 <span>{t("solo.legacyBest")}</span>
-                <strong>{formatSoloTime(legacyPersonalBestMs)}</strong>
+                <strong>{formatSoloElapsedTime(legacyPersonalBestMs, timerFormat, locale)}</strong>
               </div>
             )}
             <div>
@@ -3066,17 +3347,17 @@ export function SoloGame({
           {sessionKind === "STANDARD" && statsLevel !== "basic" && (
             <div className="solo-stats solo-stats-advanced">
               <div title={t("solo.board3bvHelp")}>
-                <span>3BV</span>
+                <span>{t("solo.boardComplexity")}</span>
                 <strong>{board3BV ?? "—"}</strong>
               </div>
               <div title={t("solo.metricHelp")}>
-                <span>3BV/s</span>
+                <span>{t("solo.clearSpeed")}</span>
                 <strong>{metricView.completionState === "PENDING"
                   ? t("solo.completionMetricPending")
                   : formatMetric(threeBvPerSecond)}</strong>
               </div>
               <div title={t("solo.metricHelp")}>
-                <span>IOE</span>
+                <span>{t("solo.efficiency")}</span>
                 <strong>
                   {metricView.completionState === "PENDING"
                     ? t("solo.completionMetricPending")
@@ -3163,6 +3444,7 @@ export function SoloGame({
           <PracticeHistory
             refreshToken={practiceHistoryRefresh}
             store={practiceHistoryStoreRef.current}
+            timerFormat={timerFormat}
           />
         ) : null
       ) : (
@@ -3172,6 +3454,7 @@ export function SoloGame({
           metricRulesVersion={SOLO_METRIC_RULES_VERSION}
           gameRulesVersion={SOLO_GAME_RULES_VERSION}
           refreshToken={pendingWriteVersion}
+          timerFormat={timerFormat}
           store={historyStoreRef.current}
           onCurrentBestChange={handleCurrentBestChange}
           onLegacyPersonalBestChange={handleLegacyPersonalBestChange}

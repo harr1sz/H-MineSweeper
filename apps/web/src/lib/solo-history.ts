@@ -6,7 +6,9 @@ import {
   type SoloPreset,
 } from "./solo";
 import {
+  CELL_QUESTIONED,
   chordCell,
+  cycleCellMark,
   createBoard,
   createGameState,
   hashBoard,
@@ -142,6 +144,8 @@ export interface SoloReplayV1 {
   readonly schemaVersion: typeof SOLO_REPLAY_SCHEMA_VERSION;
   readonly recordId: string;
   readonly initialFlags: readonly number[];
+  readonly initialQuestions?: readonly number[];
+  readonly questionMarksEnabled?: boolean;
   readonly actions: readonly SoloReplayActionV1[];
 }
 
@@ -958,7 +962,14 @@ export function validateSoloReplayV1(
   const issues: string[] = [];
   reportUnexpectedKeys(
     value,
-    ["schemaVersion", "recordId", "initialFlags", "actions"],
+    [
+      "schemaVersion",
+      "recordId",
+      "initialFlags",
+      "initialQuestions",
+      "questionMarksEnabled",
+      "actions",
+    ],
     path,
     issues,
   );
@@ -980,6 +991,36 @@ export function validateSoloReplayV1(
         issues.push(`${path}.initialFlags 必须升序且不重复`);
       }
       previous = Number(flag);
+    }
+  }
+  if (
+    replay.questionMarksEnabled !== undefined &&
+    typeof replay.questionMarksEnabled !== "boolean"
+  ) {
+    issues.push(`${path}.questionMarksEnabled 无效`);
+  }
+  if (
+    replay.initialQuestions !== undefined &&
+    !Array.isArray(replay.initialQuestions)
+  ) {
+    issues.push(`${path}.initialQuestions 必须是数组`);
+  } else if (Array.isArray(replay.initialQuestions)) {
+    let previous = -1;
+    for (const [index, question] of replay.initialQuestions.entries()) {
+      if (!Number.isSafeInteger(question) || Number(question) < 0) {
+        issues.push(`${path}.initialQuestions[${index}] 无效`);
+      }
+      if (Number(question) <= previous) {
+        issues.push(`${path}.initialQuestions 必须升序且不重复`);
+      }
+      previous = Number(question);
+    }
+    if (replay.questionMarksEnabled !== true && replay.initialQuestions.length > 0) {
+      issues.push(`${path}.initialQuestions 需要开启问号标记`);
+    }
+    const flags = new Set(replay.initialFlags ?? []);
+    if (replay.initialQuestions.some((index) => flags.has(index))) {
+      issues.push(`${path}.initialQuestions 不能与 initialFlags 重复`);
     }
   }
   if (!Array.isArray(replay.actions)) {
@@ -1088,6 +1129,9 @@ export function verifySoloReplay(
       ]);
     }
   }
+  for (const index of replay.initialQuestions ?? []) {
+    state.visibility[index] = CELL_QUESTIONED;
+  }
   for (const action of replay.actions) {
     if (hashGameState(state) !== action.preStateHash) {
       throw new SoloHistoryValidationError([
@@ -1097,7 +1141,9 @@ export function verifySoloReplay(
     const delta = action.actionType === "REVEAL"
       ? revealCell(state, action.cellIndex)
       : action.actionType === "TOGGLE_FLAG"
-        ? toggleFlag(state, action.cellIndex)
+        ? replay.questionMarksEnabled === true
+          ? cycleCellMark(state, action.cellIndex)
+          : toggleFlag(state, action.cellIndex)
         : chordCell(state, action.cellIndex);
     if (
       delta.accepted !== action.accepted ||
@@ -1153,6 +1199,7 @@ function validateReplayPair(
   const cellCount = record.board.spec.width * record.board.spec.height;
   if (
     replay.initialFlags.some((index) => index >= cellCount) ||
+    (replay.initialQuestions ?? []).some((index) => index >= cellCount) ||
     replay.actions.some((action) => action.cellIndex >= cellCount)
   ) {
     throw new SoloHistoryValidationError([
@@ -1457,6 +1504,7 @@ export function parseSoloHistoryImportDocument(
     const cellCount = record.board.spec.width * record.board.spec.height;
     if (
       replay.initialFlags.some((index) => index >= cellCount) ||
+      (replay.initialQuestions ?? []).some((index) => index >= cellCount) ||
       replay.actions.some((action) => action.cellIndex >= cellCount)
     ) {
       throw new SoloHistoryValidationError([

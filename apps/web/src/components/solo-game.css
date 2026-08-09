@@ -56,40 +56,9 @@
   margin-bottom: 26px;
 }
 
-.solo-setup-section-split {
-  grid-template-columns: 1fr 1fr;
-  gap: 32px;
-}
-
-.solo-setup-section-split > div {
-  display: grid;
-  align-content: start;
-  gap: 16px;
-}
-
-.solo-setup-advanced {
-  border: 1px solid rgba(231, 176, 74, 0.22);
-  background: rgba(8, 10, 13, 0.48);
-  margin-bottom: 26px;
-}
-
-.solo-setup-advanced > summary {
-  padding: 14px 16px;
-  color: var(--gold);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  cursor: pointer;
-}
-
-.solo-setup-advanced[open] > summary {
-  border-bottom: 1px solid rgba(231, 176, 74, 0.16);
-}
-
-.solo-setup-advanced .solo-custom-grid,
-.solo-setup-advanced .solo-setup-section-split {
-  margin: 14px;
+.solo-custom-settings {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
 }
 
 .solo-setup-heading {
@@ -117,14 +86,83 @@
   font-size: 12px;
 }
 
-.solo-setup-panel .solo-custom-grid {
-  grid-column: auto;
-  opacity: 0.42;
-  transition: opacity 140ms ease;
+.solo-display-preferences {
+  gap: 18px;
 }
 
-.solo-setup-panel .solo-custom-grid.is-enabled {
-  opacity: 1;
+.solo-advanced-settings {
+  margin: -6px 0 26px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 22px;
+}
+
+.solo-advanced-settings summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.solo-advanced-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.solo-advanced-settings summary::before {
+  content: "+";
+  color: var(--gold);
+  font: 700 14px var(--mono);
+}
+
+.solo-advanced-settings[open] summary::before {
+  content: "−";
+}
+
+.solo-advanced-settings summary span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.solo-advanced-settings summary small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.solo-advanced-settings[open] summary {
+  margin-bottom: 14px;
+}
+
+.solo-preference-list {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.solo-preference-row {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(180px, 0.72fr) minmax(420px, 1.28fr);
+  gap: 24px;
+  padding: 14px 0;
+}
+
+.solo-preference-row + .solo-preference-row {
+  border-top: 1px solid var(--line);
+}
+
+.solo-preference-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.solo-preference-copy strong {
+  font-size: 13px;
+}
+
+.solo-preference-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .solo-setup-launch {
@@ -241,12 +279,14 @@
 .solo-custom-grid {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 110px 110px 130px minmax(160px, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 110px)) minmax(150px, 180px);
+  justify-content: start;
   gap: 10px;
 }
 
 .solo-custom-grid label {
   display: grid;
+  min-width: 0;
   grid-template-columns: 28px 1fr;
   align-items: center;
   border: 1px solid #303137;
@@ -260,7 +300,9 @@
 }
 
 .solo-custom-grid input {
-  min-height: 42px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
   border: 0;
   border-left: 1px solid #303137;
   padding: 0 10px;
@@ -466,13 +508,21 @@
   grid-template-columns: repeat(3, 1fr);
 }
 
+.solo-binary-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.solo-theme-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .solo-compact-tabs button {
   min-height: 44px;
   border: 1px solid #303137;
   background: #0a0a0c;
   color: var(--muted);
   cursor: pointer;
-  font: 650 8px var(--mono);
+  font: 650 10px var(--mono);
   padding: 4px;
   transition:
     border-color 120ms ease,
@@ -483,6 +533,33 @@
 
 .solo-compact-tabs button + button {
   border-left: 0;
+}
+
+.solo-theme-tabs button {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.solo-theme-tabs button > span:last-child {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.solo-theme-swatch {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border: 1px solid;
+  font: 800 13px var(--mono);
+  text-shadow: 0 1px 1px rgb(0 0 0 / 65%);
 }
 
 .solo-compact-tabs button:hover,
@@ -834,9 +911,20 @@
     min-height: 0;
   }
 
-  .solo-setup-section-split,
   .solo-setup-launch {
     grid-template-columns: 1fr;
+  }
+
+  .solo-theme-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .solo-theme-tabs button:nth-child(odd) {
+    border-left-width: 1px;
+  }
+
+  .solo-theme-tabs button:nth-child(n + 3) {
+    border-top-width: 0;
   }
 }
 
@@ -854,6 +942,10 @@
     font-size: 46px;
   }
 
+  .solo-setup-panel {
+    padding: 20px 16px;
+  }
+
   .solo-tabs {
     grid-template-columns: 1fr 1fr;
   }
@@ -868,6 +960,22 @@
 
   .solo-custom-grid .secondary-button {
     grid-column: 1 / -1;
+  }
+
+  .solo-preference-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 16px 0;
+  }
+
+  .solo-advanced-settings summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .solo-advanced-settings summary small {
+    flex-basis: calc(100% - 28px);
+    margin-left: 26px;
   }
 
   .solo-game-layout {

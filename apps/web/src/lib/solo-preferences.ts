@@ -10,10 +10,12 @@ export const SOLO_PREFERENCES_SCHEMA_VERSION = 1 as const;
 export const SOLO_PREFERENCES_KEY = "hms-solo-preferences-v1";
 
 export type SoloStatsLevelPreference = "basic" | "advanced" | "analysis";
+export type SoloTimerFormatPreference = "clock" | "seconds";
 export type SoloBoardThemePreference =
   | "black-gold"
   | "classic"
-  | "high-contrast";
+  | "high-contrast"
+  | "ivory-tactical";
 
 export interface SoloPreferencesV1 {
   readonly schemaVersion: typeof SOLO_PREFERENCES_SCHEMA_VERSION;
@@ -21,6 +23,10 @@ export interface SoloPreferencesV1 {
   readonly config: SoloBoardConfig;
   readonly statsLevel: SoloStatsLevelPreference;
   readonly boardTheme: SoloBoardThemePreference;
+  /** Optional so preferences saved before this setting was introduced remain valid. */
+  readonly questionMarksEnabled?: boolean;
+  /** Optional so preferences saved before this setting was introduced remain valid. */
+  readonly timerFormat?: SoloTimerFormatPreference;
 }
 
 export interface SoloPreferenceLoadResult {
@@ -37,6 +43,8 @@ export interface ResolvedSoloLaunchPreferences {
   readonly preset: SoloPreset;
   readonly statsLevel: SoloStatsLevelPreference;
   readonly boardTheme: SoloBoardThemePreference;
+  readonly questionMarksEnabled: boolean;
+  readonly timerFormat: SoloTimerFormatPreference;
 }
 
 function isPreset(value: unknown): value is SoloPreset {
@@ -56,7 +64,8 @@ function isBoardTheme(value: unknown): value is SoloBoardThemePreference {
   return (
     value === "black-gold" ||
     value === "classic" ||
-    value === "high-contrast"
+    value === "high-contrast" ||
+    value === "ivory-tactical"
   );
 }
 
@@ -69,6 +78,11 @@ export function isSoloPreferencesV1(value: unknown): value is SoloPreferencesV1 
     !isPreset(preferences.preset) ||
     !isStatsLevel(preferences.statsLevel) ||
     !isBoardTheme(preferences.boardTheme) ||
+    (preferences.questionMarksEnabled !== undefined &&
+      typeof preferences.questionMarksEnabled !== "boolean") ||
+    (preferences.timerFormat !== undefined &&
+      preferences.timerFormat !== "clock" &&
+      preferences.timerFormat !== "seconds") ||
     !config ||
     (config.mode !== "classic" && config.mode !== "no_guess")
   ) {
@@ -155,6 +169,8 @@ export function resolveSoloLaunchPreferences(
       : { ...SOLO_PRESETS.beginner, mode: generationMode },
     preset: valid ? stored?.preset ?? "beginner" : "beginner",
     statsLevel: stored?.statsLevel ?? "basic",
-    boardTheme: stored?.boardTheme ?? "black-gold",
+    boardTheme: stored?.boardTheme ?? "classic",
+    questionMarksEnabled: stored?.questionMarksEnabled ?? false,
+    timerFormat: stored?.timerFormat ?? "clock",
   };
 }

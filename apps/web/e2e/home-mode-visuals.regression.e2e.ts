@@ -41,6 +41,38 @@ test("home modes stay aligned with their copy, background, and selector", async 
   await expect(title).toHaveText(translate("zh-CN", "home.duel.title"));
 });
 
+test("saved Solo preferences offer clear start and settings actions", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("hms-solo-preferences-v1", JSON.stringify({
+      schemaVersion: 1,
+      preset: "beginner",
+      config: {
+        width: 9,
+        height: 9,
+        mines: 10,
+        mode: "classic",
+      },
+      statsLevel: "basic",
+      boardTheme: "classic",
+    }));
+  });
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "开始游戏" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "设置", exact: true })).toBeVisible();
+  await expect(page.getByText("使用上次设置", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("重新设置", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
+  await page.getByRole("button", { name: "返回玩法选择" }).click();
+
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ })).toBeVisible();
+});
+
 test("Academy is no longer exposed from the home page or its former route", async ({ page }) => {
   await page.goto("/#/academy");
   await expect(page.getByRole("heading", { name: "选择玩法" })).toBeVisible();

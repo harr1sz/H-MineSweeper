@@ -14,6 +14,8 @@ import {
   type SoloRunRecord,
 } from "../lib/solo-history";
 import type { SoloBoardConfig, SoloPreset } from "../lib/solo";
+import type { SoloTimerFormatPreference } from "../lib/solo-preferences";
+import { formatSoloElapsedTime } from "../lib/solo-time";
 import { metricValuesForHistoryRecord } from "../lib/solo-metrics";
 import { useTelemetry } from "./TelemetryPrivacy";
 import { useLocale, type MessageDescriptor } from "../i18n";
@@ -32,6 +34,7 @@ interface SoloHistoryProps {
   readonly metricRulesVersion: number;
   readonly gameRulesVersion: number;
   readonly refreshToken: number;
+  readonly timerFormat: SoloTimerFormatPreference;
   readonly store?: SoloHistoryStore;
   readonly onStorageError?: (message: string) => void;
   readonly onCurrentBestChange?: (elapsedMs: number | null) => void;
@@ -62,15 +65,6 @@ function readHistoryUiPreferences(): {
   }
 }
 
-function formatTime(elapsedMs: number | null): string {
-  if (elapsedMs === null) return "—";
-  const centiseconds = Math.floor(Math.max(0, elapsedMs) / 10);
-  const minutes = Math.floor(centiseconds / 6_000);
-  const seconds = Math.floor((centiseconds % 6_000) / 100);
-  const fraction = centiseconds % 100;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(fraction).padStart(2, "0")}`;
-}
-
 function formatMetric(value: number | null, digits = 2): string {
   return value === null || !Number.isFinite(value)
     ? "—"
@@ -87,13 +81,18 @@ export function SoloHistory({
   metricRulesVersion,
   gameRulesVersion,
   refreshToken,
+  timerFormat,
   store = indexedDbStore,
   onStorageError,
   onCurrentBestChange,
   onLegacyPersonalBestChange,
 }: SoloHistoryProps) {
   const { track } = useTelemetry();
-  const { t, formatDateTime } = useLocale();
+  const { locale, t, formatDateTime } = useLocale();
+  const formatTime = (elapsedMs: number | null) =>
+    elapsedMs === null
+      ? "—"
+      : formatSoloElapsedTime(elapsedMs, timerFormat, locale);
   const initialUiPreferences = useMemo(readHistoryUiPreferences, []);
   const [records, setRecords] = useState<readonly SoloRunRecord[]>([]);
   const [rawRecords, setRawRecords] = useState<readonly unknown[]>([]);
@@ -617,9 +616,9 @@ export function SoloHistory({
                     </small>
                   </div>
                   <b>{formatTime(record.metrics.elapsedMs)}</b>
-                  <span>3BV/s {formatMetric(completionMetrics.threeBvPerSecond)}</span>
+                  <span>{t("solo.clearSpeed")} {formatMetric(completionMetrics.threeBvPerSecond)}</span>
                   <span>
-                    IOE{" "}
+                    {t("solo.efficiency")}{" "}
                     {completionMetrics.ioe === null
                       ? "—"
                       : `${(completionMetrics.ioe * 100).toFixed(1)}%`}

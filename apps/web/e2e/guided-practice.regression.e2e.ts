@@ -136,16 +136,16 @@ async function useDeterministicPracticeEnvironment(
 async function enterClassicGuidedPractice(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
   await page.getByRole("button", { name: "引导练习" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
   await page.getByRole("button", { name: "经典模式" }).click();
-  await expect(page.getByText(/经典模式可能遇到无法从当前信息确定的局面/u)).toBeVisible();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await expect(page.getByText(/经典模式有时会遇到只能猜的局面/u)).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("heading", { name: "实时教练" })).toBeVisible();
 }
 
@@ -225,9 +225,9 @@ async function autoFlagGlyphPixelCounts(
       let focusPixels = 0;
       for (let offset = 0; offset < image.data.length; offset += 4) {
         if (
-          Math.abs((image.data[offset] ?? 0) - 255) <= 2 &&
-          Math.abs((image.data[offset + 1] ?? 0) - 217) <= 2 &&
-          Math.abs((image.data[offset + 2] ?? 0) - 137) <= 2 &&
+          Math.abs((image.data[offset] ?? 0) - 247) <= 2 &&
+          Math.abs((image.data[offset + 1] ?? 0) - 198) <= 2 &&
+          Math.abs((image.data[offset + 2] ?? 0) - 106) <= 2 &&
           (image.data[offset + 3] ?? 0) > 0
         ) {
           focusPixels += 1;
@@ -239,9 +239,9 @@ async function autoFlagGlyphPixelCounts(
 }
 
 async function expectPracticeSaved(page: Page): Promise<void> {
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
   await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "练习历史" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "练习记录" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "查看最终棋盘" })).toBeVisible();
   await expect(page.getByRole("button", { name: "返回首页" })).toBeVisible();
 }
@@ -339,7 +339,7 @@ test("guided practice stays fully localized through setup, coaching, result, his
   await page.goto("/");
   await page.getByRole("button", { name: "切换到英文" }).click();
   await expect(page.getByRole("button", { name: "Guided practice" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Set up a solo game" }).click();
+  await page.getByRole("button", { name: "Start game" }).click();
   await expect(page.getByRole("heading", { name: "Set up a solo game" })).toBeVisible();
   await page.getByRole("button", { name: "Guided practice" }).click();
   await expect(page.getByRole("button", { name: "Guided practice" })).toHaveAttribute(
@@ -416,16 +416,16 @@ test("guided practice stays score-isolated and saves a verified practice replay"
 
   await page.goto("/");
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
-  await expect(page.getByRole("heading", { name: "配置单人对局" })).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
+  await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
   await page.getByRole("button", { name: "引导练习" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
   await page.getByRole("button", { name: "经典模式" }).click();
-  await expect(page.getByText(/经典模式可能遇到无法从当前信息确定的局面/u)).toBeVisible();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await expect(page.getByText(/经典模式有时会遇到只能猜的局面/u)).toBeVisible();
+  await page.getByRole("button", { name: "开始游戏" }).click();
 
   await expect(page.getByRole("heading", { name: "实时教练" })).toBeVisible();
   await expect(page.getByText("练习记录 · 不计成绩").first()).toBeVisible();
@@ -453,13 +453,15 @@ test("guided practice stays score-isolated and saves a verified practice replay"
   await expect(page.locator(".practice-coach-message")).not.toContainText("正在分析");
   await clickBoardCell(page, mineIndex);
 
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
   await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "练习历史" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "练习记录" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "查看本局复盘" })).toBeVisible();
   await expect(page.getByRole("button", { name: "查看最终棋盘" })).toBeVisible();
   await expect(page.getByRole("button", { name: "返回首页" })).toBeVisible();
-  await expect(page.getByText(/新 PB|当前规则最佳/u)).toHaveCount(0);
+  await expect(
+    page.getByText(/刷新本机最佳成绩|相同设置下的最佳成绩/u),
+  ).toHaveCount(0);
 
   const counts = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -491,7 +493,40 @@ test("guided practice stays score-isolated and saves a verified practice replay"
 
   await page.getByRole("link", { name: "查看本局复盘" }).click();
   await expect(page.getByRole("heading", { name: "练习局复盘" })).toBeVisible();
-  await expect(page.getByText(/已验证 \d+ 个练习事件/u)).toBeVisible();
+  await expect(page.getByText(/已检查 \d+ 步/u)).toBeVisible();
+});
+
+test("练习模式踩雷后可以回到踩雷前一步并继续同一张棋盘", async ({ page }) => {
+  await useDeterministicPracticeEnvironment(page);
+  await enterClassicGuidedPractice(page);
+  const mineIndex = fixedBoard().mines.findIndex((value) => value === 1);
+
+  await clickBoardCell(page, FIRST_INDEX);
+  await clickBoardCell(page, mineIndex);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
+  const firstBoardHash = await page.locator(".solo-proof code").textContent();
+  await expect(readPracticeStoreSnapshot(page)).resolves.toMatchObject({
+    runCount: 1,
+    replayCount: 1,
+  });
+
+  await page
+    .getByRole("button", { name: "回到踩雷前一步", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toHaveCount(0);
+  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
+  await expect(page.getByText("已回到踩雷前一步，可以换一种走法。")).toBeVisible();
+  await expect(page.locator(".solo-proof code")).toHaveText(firstBoardHash ?? "");
+  await expect(page.getByRole("button", { name: "立即提示" })).toBeEnabled();
+
+  await clickBoardCell(page, mineIndex);
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(page.getByText("练习记录和复盘已保存。本局不计入成绩。")).toBeVisible();
+  await expect(readPracticeStoreSnapshot(page)).resolves.toMatchObject({
+    runCount: 2,
+    replayCount: 2,
+  });
 });
 
 test("a practice terminal leaves existing standard history, PB, and trend input unchanged", async ({
@@ -508,31 +543,31 @@ test("a practice terminal leaves existing standard history, PB, and trend input 
     }));
   });
 
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page.locator(".solo-setup-section")
-    .filter({ hasText: "生成规则" })
+    .filter({ hasText: "棋盘类型" })
     .getByRole("button", { name: "经典模式" })
     .click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await clickBoardCell(page, FIRST_INDEX);
   await clickBoardCell(page, fixedBoard().mines.findIndex((value) => value === 1));
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
   await expect.poll(async () => (await readStandardScoreState(page)).standardRuns.length)
     .toBe(1);
   await expect.poll(async () => (await readStandardScoreState(page)).standardReplays.length)
     .toBe(1);
-  await expect(page.getByText(/已将 1 条旧版 PB 保留为只读参考/u)).toBeVisible();
+  await expect(page.getByText(/已保留 1 条旧版最佳成绩作为参考/u)).toBeVisible();
   const beforePractice = await readStandardScoreState(page);
 
   await page.getByRole("button", { name: "返回首页" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "重新配置" }).click();
+  await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("button", { name: "引导练习" }).click();
   await page.locator(".solo-setup-section")
-    .filter({ hasText: "生成规则" })
+    .filter({ hasText: "棋盘类型" })
     .getByRole("button", { name: "经典模式" })
     .click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await clickBoardCell(page, FIRST_INDEX);
   await clickBoardCell(page, fixedBoard().mines.findIndex((value) => value === 1));
   await expectPracticeSaved(page);
@@ -552,11 +587,11 @@ test("practice history clears and imports both stores atomically without hiding 
   await clickBoardCell(page, FIRST_INDEX);
   await clickBoardCell(page, fixedBoard().mines.findIndex((value) => value === 1));
   await expectPracticeSaved(page);
-  await page.getByRole("button", { name: "查看练习历史" }).click();
-  await expect(page.getByRole("heading", { name: "练习历史" })).toBeVisible();
+  await page.getByRole("button", { name: "查看练习记录" }).click();
+  await expect(page.getByRole("heading", { name: "练习记录" })).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "导出练习 JSON" }).click();
+  await page.getByRole("button", { name: "导出练习记录" }).click();
   const download = await downloadPromise;
   const downloadPath = await download.path();
   if (!downloadPath) throw new Error("练习导出文件不可读取");
@@ -564,9 +599,11 @@ test("practice history clears and imports both stores atomically without hiding 
   expect(exported.records).toHaveLength(1);
   expect(exported.replays).toHaveLength(1);
 
-  await page.getByRole("button", { name: "删除练习历史" }).click();
+  await page.getByRole("button", { name: "删除练习记录" }).click();
   await page.getByRole("button", { name: "再次点击确认删除" }).click();
-  await expect(page.getByText("练习历史已删除。标准对局历史未修改。")).toBeVisible();
+  await expect(
+    page.getByText("练习记录已删除，普通游戏的记录没有改动。"),
+  ).toBeVisible();
   await expect(readPracticeStoreSnapshot(page)).resolves.toMatchObject({
     runCount: 0,
     replayCount: 0,
@@ -629,7 +666,7 @@ test("practice history clears and imports both stores atomically without hiding 
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(conflictDocument)),
   });
-  await expect(page.getByText("导入失败，整批数据均未写入。")).toBeVisible();
+  await expect(page.getByText("导入失败，没有写入任何记录。")).toBeVisible();
   const afterConflict = await readPracticeStoreSnapshot(page);
   expect(afterConflict).toMatchObject({ runCount: 21, replayCount: 21 });
   expect(afterConflict.records.find(({ recordId }) => recordId === records[0]!.recordId)?.completedAt)
@@ -648,7 +685,7 @@ test("practice history clears and imports both stores atomically without hiding 
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(overCapacityDocument)),
   });
-  await expect(page.getByText("导入失败，整批数据均未写入。")).toBeVisible();
+  await expect(page.getByText("导入失败，没有写入任何记录。")).toBeVisible();
   await expect(readPracticeStoreSnapshot(page)).resolves.toMatchObject({
     runCount: 21,
     replayCount: 21,
@@ -662,7 +699,7 @@ test("8 秒自动提示在同一可见状态只展示并记录一次", async ({ 
 
   await clickBoardCell(page, FIRST_INDEX);
   const coachMessage = page.locator(".practice-coach-message");
-  await expect(coachMessage).toContainText("如果棋盘保持不变");
+  await expect(coachMessage).toContainText("如果暂时没有操作");
   await expect(coachMessage).toHaveText(
     "根据当前可见信息，没有能够确定的下一步。",
     { timeout: 11_000 },
@@ -701,7 +738,7 @@ test("示范下一步只执行一个有证明的教练动作", async ({ page }) 
   await clickBoardCell(page, FIRST_INDEX);
   await clickBoardCell(page, PROOF_REVEAL_INDEX);
   await expect(page.locator(".practice-coach-message")).toContainText(
-    "如果棋盘保持不变",
+    "如果暂时没有操作",
   );
   await page.getByRole("button", { name: "示范下一步" }).click();
   await expect(remainingMines(page)).toHaveText("9");
@@ -761,13 +798,13 @@ test("玩家快于当前 Worker 时，教练仍按操作前可见局面回填证
 
   await clickBoardCell(page, FIRST_INDEX);
   await expect(page.locator(".practice-coach-message")).toContainText(
-    "如果棋盘保持不变",
+    "如果暂时没有操作",
   );
   const provenMine = provenMineTargetsAfterProofReveal()[0]!;
   await clickBoardCell(page, PROOF_REVEAL_INDEX);
   await clickBoardCell(page, provenMine, "right");
 
-  await expect(page.getByText("这一步可以由当时可见的数字确定推出。", { exact: true }))
+  await expect(page.getByText("根据当时看得见的数字，可以确定这一步是安全的。", { exact: true }))
     .toBeVisible();
   await expect.poll(() => page.evaluate(() => (
     globalThis as typeof globalThis & {
@@ -788,7 +825,7 @@ test("自动标雷只执行单数字证明且尊重玩家取消直到出现新�
   await clickBoardCell(page, FIRST_INDEX);
   await clickBoardCell(page, PROOF_REVEAL_INDEX);
   await expect(page.locator(".practice-coach-message")).toContainText(
-    "如果棋盘保持不变",
+    "如果暂时没有操作",
   );
   await page.getByRole("checkbox", { name: /自动标雷/u }).check();
   await expect(remainingMines(page)).toHaveText("8");

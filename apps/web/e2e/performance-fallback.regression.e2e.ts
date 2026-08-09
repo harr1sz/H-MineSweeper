@@ -22,7 +22,7 @@ test("ISSUE-004 performance fallback stays unobtrusive", async ({ page }) => {
   });
 
   await expect(
-    page.getByRole("button", { name: "切换装饰效果档位" }),
+    page.getByRole("button", { name: "选择视觉效果" }),
   ).toContainText("轻量", { timeout: 3_000 });
   await expect(
     page.getByText(/输入或动画帧预算|降低装饰效果/),

@@ -50,6 +50,9 @@ export function ReplayBoard({ width, height, state }: {
       } else if (value === -3) {
         context.fillStyle = "#ffd36f";
         context.fillText("⚑", x + cellSize / 2, y + cellSize / 2);
+      } else if (value === -4) {
+        context.fillStyle = "#ffd36f";
+        context.fillText("?", x + cellSize / 2, y + cellSize / 2);
       }
       if (state.otherMines.has(index) || state.detonatedMine === index) {
         context.beginPath();

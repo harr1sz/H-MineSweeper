@@ -16,11 +16,13 @@ const PREFERENCES: SoloPreferencesV1 = {
     mode: "no_guess",
   },
   statsLevel: "analysis",
-  boardTheme: "high-contrast",
+  boardTheme: "ivory-tactical",
+  questionMarksEnabled: true,
+  timerFormat: "seconds",
 };
 
 describe("solo preferences", () => {
-  it("round trips the latest config, mode, stats level, and theme", () => {
+  it("round trips the latest game and display preferences", () => {
     let stored: string | null = null;
     const storage = {
       getItem: () => stored,
@@ -65,6 +67,21 @@ describe("solo preferences", () => {
     });
     expect(resolveSoloLaunchPreferences(PREFERENCES)).toMatchObject({
       config: { mode: "no_guess" },
+    });
+  });
+
+  it("keeps older v1 preferences and supplies defaults for new options", () => {
+    const legacy: SoloPreferencesV1 = {
+      schemaVersion: 1,
+      preset: PREFERENCES.preset,
+      config: PREFERENCES.config,
+      statsLevel: PREFERENCES.statsLevel,
+      boardTheme: PREFERENCES.boardTheme,
+    };
+
+    expect(resolveSoloLaunchPreferences(legacy)).toMatchObject({
+      questionMarksEnabled: false,
+      timerFormat: "clock",
     });
   });
 });

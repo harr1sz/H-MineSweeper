@@ -119,20 +119,24 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
 
   await page.goto("/");
   const dialogHeading = page.getByRole("heading", {
-    name: "选择是否分享假名化使用数据",
+    name: translate("zh-CN", "privacy.title"),
   });
   await expect(dialogHeading).toBeVisible();
-  const privacyDialog = page.getByRole("dialog", { name: "选择是否分享假名化使用数据" });
+  const privacyDialog = page.getByRole("dialog", {
+    name: translate("zh-CN", "privacy.title"),
+  });
   await privacyDialog.getByRole("button", { name: "切换到英文" }).click();
   await expect(page.getByRole("heading", { name: "Choose whether to share pseudonymous usage data" })).toBeVisible();
   await page.getByRole("dialog", { name: "Choose whether to share pseudonymous usage data" }).getByRole("button", { name: "Switch to Chinese" }).click();
   await expect(
-    page.getByRole("button", { name: "稍后决定，继续游戏" }),
+    page.getByRole("button", {
+      name: translate("zh-CN", "privacy.defer"),
+    }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialogHeading).toBeHidden();
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "切换到英文" }).click();
   await page.locator(".home-mode-option").nth(1).click();
@@ -146,7 +150,9 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
   await page.getByRole("button", { name: "Switch to Chinese" }).click();
 
   await page.getByRole("button", { name: "数据与隐私" }).click();
-  await page.getByRole("button", { name: "稍后决定，继续游戏" }).click();
+  await page
+    .getByRole("button", { name: translate("zh-CN", "privacy.defer") })
+    .click();
   expect(telemetryRequests).toBe(0);
   expect(
     await page.evaluate(() => ({
@@ -172,10 +178,14 @@ test("公开 Alpha 无邀请码门槛，退出遥测不阻塞单人入口", asyn
   await expect(page.getByLabel("邀请码")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "进入 Alpha" })).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "选择是否分享假名化使用数据" }),
+    page.getByRole("heading", {
+      name: translate("zh-CN", "privacy.title"),
+    }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "继续并开启（默认）" }),
+    page.getByRole("button", {
+      name: translate("zh-CN", "privacy.enable"),
+    }),
   ).toBeFocused();
   expect(
     await page.evaluate(() =>
@@ -183,7 +193,9 @@ test("公开 Alpha 无邀请码门槛，退出遥测不阻塞单人入口", asyn
     ),
   ).toBeNull();
 
-  await page.getByRole("button", { name: "退出遥测并继续" }).click();
+  await page
+    .getByRole("button", { name: translate("zh-CN", "privacy.disable") })
+    .click();
   await expect.poll(() => preferenceBodies).toEqual([
     {
       enabled: false,
@@ -196,7 +208,7 @@ test("公开 Alpha 无邀请码门槛，退出遥测不阻塞单人入口", asyn
     { method: "POST", body: null },
   ]);
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
   expect(
     await page.evaluate(() =>
@@ -226,13 +238,13 @@ test("浏览器存储被阻止时公开单人入口仍可使用", async ({ page 
 
   await page.goto("/");
   const soloEntry = page.getByRole("button", {
-    name: "开始单人游戏",
+    name: "开始游戏",
   });
   await expect(soloEntry).toBeVisible();
   await soloEntry.click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(
-    page.getByRole("heading", { name: "经典扫雷", exact: true }),
+    page.getByRole("heading", { name: "扫雷", exact: true }),
   ).toBeVisible();
 });
 
@@ -251,13 +263,15 @@ test("公开遥测会话容量不足时，游戏保持可用且明确标记证�
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "退出遥测并继续" }).click();
+  await page
+    .getByRole("button", { name: translate("zh-CN", "privacy.disable") })
+    .click();
   await expect(
-    page.getByText(/服务端未能记录本次开关状态/),
+    page.getByText(/服务器没能保存这次选择/),
   ).toBeVisible();
   expect(preferenceRequests).toBe(0);
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
 });
 
@@ -289,7 +303,9 @@ test("默认开启只上传白名单事件，并可单独删除服务端原始�
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "继续并开启（默认）" }).click();
+  await page
+    .getByRole("button", { name: translate("zh-CN", "privacy.enable") })
+    .click();
   await expect.poll(() => telemetryBatch).not.toBeNull();
   expect(telemetrySession.requests).toHaveLength(1);
   expect(preferenceBodies.length).toBeGreaterThanOrEqual(1);
@@ -316,14 +332,18 @@ test("默认开启只上传白名单事件，并可单独删除服务端原始�
   );
 
   await page.getByRole("button", { name: "数据与隐私" }).click();
-  await page.getByRole("button", { name: "删除服务端原始遥测" }).click();
-  await expect(page.getByText(/服务端已接受删除请求/)).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: translate("zh-CN", "privacy.deleteRemote"),
+    })
+    .click();
+  await expect(page.getByText(/删除完成/)).toBeVisible();
   expect(deletionBody).toMatchObject({
     pseudonymousInstallId: expect.stringMatching(/^[a-f0-9]{32}$/),
     deletionToken: expect.stringMatching(/^[a-f0-9]{64}$/),
   });
   await expect(
-    page.getByRole("button", { name: "删除全部历史" }),
+    page.getByRole("button", { name: "删除所有记录" }),
   ).toHaveCount(0);
 });
 
@@ -361,7 +381,9 @@ test("组件不卸载时空闲 30 分钟会轮换训练会话，并保持单局 
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "继续并开启（默认）" }).click();
+  await page
+    .getByRole("button", { name: translate("zh-CN", "privacy.enable") })
+    .click();
   await expect
     .poll(
       () =>
@@ -369,7 +391,7 @@ test("组件不卸载时空闲 30 分钟会轮换训练会话，并保持单局 
           .length,
     )
     .toBe(1);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page
     .locator(".solo-tabs")
     .getByRole("button", { name: /^自定义 5–100/ })
@@ -377,7 +399,7 @@ test("组件不卸载时空闲 30 分钟会轮换训练会话，并保持单局 
   await page.getByLabel("自定义宽度").fill("5");
   await page.getByLabel("自定义高度").fill("5");
   await page.getByLabel("自定义雷数").fill("10");
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await finishSmallCustomRun(page);
   await expect
     .poll(
@@ -396,7 +418,12 @@ test("组件不卸载时空闲 30 分钟会轮换训练会话，并保持单局 
       }
     ).__hmsSetTestNow(nextNow);
   }, secondRunNow);
-  await page.getByRole("button", { name: "新棋盘" }).click();
+  await page
+    .getByRole("button", {
+      name: translate("zh-CN", "solo.sameBoard"),
+      exact: true,
+    })
+    .click();
   await finishSmallCustomRun(page);
   await expect
     .poll(

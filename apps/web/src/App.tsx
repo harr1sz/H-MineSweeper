@@ -1350,7 +1350,7 @@ export function App() {
                 {homeMode === "solo" ? (
                   <>
                     {savedSoloPreferences ? (
-                      <>
+                      <div className="entry-action-row">
                         <button
                           className="primary-button"
                           type="button"
@@ -1363,23 +1363,23 @@ export function App() {
                             );
                           }}
                         >
-                          {t("home.solo.continue")}
+                          {t("home.solo.start")}
                         </button>
                         <button
-                          className="secondary-button home-reconfigure"
+                          className="secondary-button home-settings"
                           type="button"
                           onClick={() => enterSolo()}
                         >
-                          {t("home.solo.reconfigure")}
+                          {t("home.solo.settings")}
                         </button>
-                      </>
+                      </div>
                     ) : (
                       <button
                         className="primary-button"
                         type="button"
                         onClick={() => enterSolo()}
                       >
-                        {t("home.solo.enter")}
+                        {t("home.solo.start")}
                       </button>
                     )}
                     <p className="entry-mode-note">

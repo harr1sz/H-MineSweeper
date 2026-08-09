@@ -1,9 +1,11 @@
 import {
+  CELL_QUESTIONED,
   CELL_REVEALED,
   analyzeVisibleBoard,
   chordCell,
   createBoard,
   createGameState,
+  cycleCellMark,
   hashGameState,
   hashVisibleBoardState,
   revealCell,
@@ -53,6 +55,7 @@ export type ReplayWorkerResponse =
         readonly outcome: GameState["outcome"];
         readonly revealed: readonly { readonly index: number; readonly value: number }[];
         readonly flagChange?: { readonly index: number; readonly flagged: boolean };
+        readonly questionChange?: { readonly index: number; readonly questioned: boolean };
       };
     }
   | {
@@ -68,6 +71,7 @@ export type ReplayWorkerResponse =
         readonly outcome: GameState["outcome"];
         readonly revealed: readonly { readonly index: number; readonly value: number }[];
         readonly flagChange?: { readonly index: number; readonly flagged: boolean };
+        readonly questionChange?: { readonly index: number; readonly questioned: boolean };
       }[];
       readonly terminal: {
         readonly detonatedMine?: number;
@@ -163,6 +167,9 @@ self.addEventListener("message", async (event: MessageEvent<ReplayWorkerRequest>
       return;
     }
   }
+  for (const index of replay.initialQuestions ?? []) {
+    state.visibility[index] = CELL_QUESTIONED;
+  }
   const steps: Array<Extract<ReplayWorkerResponse, { type: "RESULT"; ok: true }>["steps"][number]> = [];
   const analysisCache = new Map<string, VisibleBoardAnalysis>();
   let remainingNodeBudget = request.type === "ANALYZE_STEP"
@@ -197,7 +204,9 @@ self.addEventListener("message", async (event: MessageEvent<ReplayWorkerRequest>
     const delta = action.actionType === "REVEAL"
       ? revealCell(state, action.cellIndex)
       : action.actionType === "TOGGLE_FLAG"
-        ? toggleFlag(state, action.cellIndex)
+        ? replay.questionMarksEnabled === true
+          ? cycleCellMark(state, action.cellIndex)
+          : toggleFlag(state, action.cellIndex)
         : chordCell(state, action.cellIndex);
     if (
       delta.accepted !== action.accepted ||
@@ -219,6 +228,7 @@ self.addEventListener("message", async (event: MessageEvent<ReplayWorkerRequest>
       outcome: state.outcome,
       revealed: delta.revealed.map(({ index, value }) => ({ index, value })),
       ...(delta.flagged ? { flagChange: delta.flagged } : {}),
+      ...(delta.questioned ? { questionChange: delta.questioned } : {}),
     } : undefined;
     if (analyzedStep) steps.push(analyzedStep);
     if (request.type === "ANALYZE_STEP" && action.seq === request.seq && analyzedStep) {

@@ -71,7 +71,7 @@ describe("locale contract", () => {
   });
 
   it("uses plain Chinese on the home page", () => {
-    expect(translate("zh-CN", "home.solo.enter")).toBe("开始单人游戏");
+    expect(translate("zh-CN", "home.solo.start")).toBe("开始游戏");
     expect(translate("zh-CN", "home.solo.description")).toBe(
       "成绩和复盘都保存在这台设备上。你可以比较相同难度下的速度、效率和失误，再开始下一局。",
     );
@@ -79,7 +79,7 @@ describe("locale contract", () => {
       "初级 / 中级 / 高级 / 自定义",
     );
     expect(translate("zh-CN", "home.solo.detail2")).toBe("经典随机 / 无猜");
-    expect(translate("zh-CN", "home.solo.detail3")).toBe("标准对局 / 引导练习");
+    expect(translate("zh-CN", "home.solo.detail3")).toBe("普通游戏 / 引导练习");
   });
 
   it("does not use em dashes, en dashes, or Chinese sentence punctuation in English messages", () => {
