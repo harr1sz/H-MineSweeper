@@ -2733,38 +2733,10 @@ export function SoloGame({
                 <small>5–100 / ≤10K</small>
               </button>
             </div>
-          </div>
 
-          <div className="solo-setup-section">
-            <div className="solo-setup-heading">
-              <span>03</span>
-              <div>
-                <strong>{t("solo.generation")}</strong>
-                <small>{t("solo.generationHelp")}</small>
-              </div>
-            </div>
-            <div className="solo-mode-tabs">
-              <button
-                className={`solo-mode${mode === "classic" ? " is-active" : ""}`}
-                type="button"
-                onClick={() => chooseMode("classic")}
-              >
-                {t("solo.classic")}
-              </button>
-              <button
-                className={`solo-mode${mode === "no_guess" ? " is-active" : ""}`}
-                type="button"
-                onClick={() => chooseMode("no_guess")}
-              >
-                {t("solo.noGuess")}
-              </button>
-            </div>
-          </div>
-
-          <details className="solo-setup-advanced" open={preset === "custom" ? true : undefined}>
-            <summary>{t("solo.advancedSettings")}</summary>
-            {preset === "custom" && (
-              <div className="solo-custom-grid is-enabled">
+            <details className="solo-setup-advanced" open={preset === "custom" ? true : undefined}>
+              <summary>{t("solo.advancedSettings")}</summary>
+              <div className="solo-custom-grid">
                 <label>
                   <span>{t("solo.width")}</span>
                   <input
@@ -2804,67 +2776,99 @@ export function SoloGame({
                   {t("solo.validateCustom")}
                 </button>
               </div>
-            )}
-            <div className="solo-setup-section solo-setup-section-split">
-            <div>
-              <div className="solo-setup-heading">
-                <span>04</span>
-                <div>
+            </details>
+          </div>
+
+          <div className="solo-setup-section">
+            <div className="solo-setup-heading">
+              <span>03</span>
+              <div>
+                <strong>{t("solo.generation")}</strong>
+                <small>{t("solo.generationHelp")}</small>
+              </div>
+            </div>
+            <div className="solo-mode-tabs">
+              <button
+                className={`solo-mode${mode === "classic" ? " is-active" : ""}`}
+                type="button"
+                onClick={() => chooseMode("classic")}
+              >
+                {t("solo.classic")}
+              </button>
+              <button
+                className={`solo-mode${mode === "no_guess" ? " is-active" : ""}`}
+                type="button"
+                onClick={() => chooseMode("no_guess")}
+              >
+                {t("solo.noGuess")}
+              </button>
+            </div>
+          </div>
+
+          <div className="solo-setup-section solo-display-preferences">
+            <div className="solo-setup-heading">
+              <span>04</span>
+              <div>
+                <strong>{t("solo.displayPreferences")}</strong>
+                <small>{t("solo.displayPreferencesHelp")}</small>
+              </div>
+            </div>
+
+            <div className="solo-preference-list">
+              <div className="solo-preference-row">
+                <div className="solo-preference-copy">
                   <strong>{t("solo.dataLevel")}</strong>
                   <small>{t("solo.dataLevelHelp")}</small>
                 </div>
+                <div className="solo-compact-tabs" role="group" aria-label={t("solo.dataLevelAria")}>
+                  {(
+                    [
+                      ["basic", t("solo.basic")],
+                      ["advanced", t("solo.advanced")],
+                      ["analysis", t("solo.details")],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      className={statsLevel === value ? "is-active" : ""}
+                      key={value}
+                      type="button"
+                      aria-pressed={statsLevel === value}
+                      onClick={() => chooseStatsLevel(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="solo-compact-tabs" role="group" aria-label={t("solo.dataLevelAria")}>
-                {(
-                  [
-                    ["basic", t("solo.basic")],
-                    ["advanced", t("solo.advanced")],
-                    ["analysis", t("solo.details")],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    className={statsLevel === value ? "is-active" : ""}
-                    key={value}
-                    type="button"
-                    aria-pressed={statsLevel === value}
-                    onClick={() => chooseStatsLevel(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="solo-setup-heading">
-                <span>05</span>
-                <div>
+
+              <div className="solo-preference-row solo-theme-row">
+                <div className="solo-preference-copy">
                   <strong>{t("solo.boardDisplay")}</strong>
                   <small>{t("solo.boardDisplayHelp")}</small>
                 </div>
-              </div>
-              <div className="solo-compact-tabs solo-theme-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
-                {(
-                  [
-                    ["black-gold", t("solo.comfort")],
-                    ["classic", t("solo.professional")],
-                    ["high-contrast", t("solo.highContrast")],
-                    ["ivory-tactical", t("solo.ivoryTactical")],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    className={boardTheme === value ? "is-active" : ""}
-                    key={value}
-                    type="button"
-                    aria-pressed={boardTheme === value}
-                    onClick={() => chooseBoardTheme(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
+                <div className="solo-compact-tabs solo-theme-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
+                  {(
+                    [
+                      ["black-gold", t("solo.comfort")],
+                      ["classic", t("solo.professional")],
+                      ["high-contrast", t("solo.highContrast")],
+                      ["ivory-tactical", t("solo.ivoryTactical")],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      className={boardTheme === value ? "is-active" : ""}
+                      key={value}
+                      type="button"
+                      aria-pressed={boardTheme === value}
+                      onClick={() => chooseBoardTheme(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-            </div>
-          </details>
+          </div>
 
           <div className="solo-setup-launch">
             <div>
