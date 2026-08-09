@@ -38,7 +38,7 @@ async function openSoloSetup(page: Page): Promise<void> {
     { fixedNow: FIXED_NOW, fixedRandomWord: FIXED_RANDOM_WORD },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(
     page.getByRole("heading", { name: "开始新游戏" }),
   ).toBeVisible();
@@ -52,6 +52,32 @@ function cellPosition(index: number, width: number, canvasWidth: number) {
   };
 }
 
+test("fixed difficulties expose no editable board parameters", async ({
+  page,
+}) => {
+  await openSoloSetup(page);
+
+  const customSettings = page.getByRole("group", {
+    name: "自定义棋盘参数",
+  });
+  const presets = page.locator(".solo-tabs");
+
+  await expect(customSettings).toHaveCount(0);
+  for (const name of [/^初级 9×9/, /^中级 16×16/, /^高级 30×16/]) {
+    await presets.getByRole("button", { name }).click();
+    await expect(customSettings).toHaveCount(0);
+  }
+
+  await presets.getByRole("button", { name: /^自定义 5–100/ }).click();
+  await expect(customSettings).toBeVisible();
+  await expect(page.getByLabel("自定义宽度")).toBeEditable();
+  await expect(page.getByLabel("自定义高度")).toBeEditable();
+  await expect(page.getByLabel("自定义雷数")).toBeEditable();
+
+  await presets.getByRole("button", { name: /^初级 9×9/ }).click();
+  await expect(customSettings).toHaveCount(0);
+});
+
 test("solo uses a configuration gateway before rendering the board", async ({
   page,
 }) => {
@@ -60,7 +86,6 @@ test("solo uses a configuration gateway before rendering the board", async ({
   await expect(page.locator('canvas[role="grid"]')).toHaveCount(0);
   await page.getByRole("button", { name: /高级 30×16/ }).click();
   await page.getByRole("button", { name: "无猜模式" }).click();
-  await page.getByText("高级设置", { exact: true }).click();
   await page.getByRole("button", { name: "详细" }).click();
   await page.getByRole("button", { name: "经典", exact: true }).click();
   await page.getByRole("button", { name: "开始游戏" }).click();
@@ -79,7 +104,6 @@ test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", as
   page,
 }) => {
   await openSoloSetup(page);
-  await page.getByText("高级设置", { exact: true }).click();
   await page.getByRole("button", { name: "详细" }).click();
   await page.getByRole("button", { name: "开始游戏" }).click();
 

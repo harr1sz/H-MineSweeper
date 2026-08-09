@@ -136,7 +136,7 @@ test("首次遥测说明可延后或按 Escape 关闭，且不创建遥测会话
   await page.keyboard.press("Escape");
   await expect(dialogHeading).toBeHidden();
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "切换到英文" }).click();
   await page.locator(".home-mode-option").nth(1).click();
@@ -208,7 +208,7 @@ test("公开 Alpha 无邀请码门槛，退出遥测不阻塞单人入口", asyn
     { method: "POST", body: null },
   ]);
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
   expect(
     await page.evaluate(() =>
@@ -238,7 +238,7 @@ test("浏览器存储被阻止时公开单人入口仍可使用", async ({ page 
 
   await page.goto("/");
   const soloEntry = page.getByRole("button", {
-    name: "开始单人游戏",
+    name: "开始游戏",
   });
   await expect(soloEntry).toBeVisible();
   await soloEntry.click();
@@ -271,7 +271,7 @@ test("公开遥测会话容量不足时，游戏保持可用且明确标记证�
   ).toBeVisible();
   expect(preferenceRequests).toBe(0);
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
 });
 
@@ -391,7 +391,7 @@ test("组件不卸载时空闲 30 分钟会轮换训练会话，并保持单局 
           .length,
     )
     .toBe(1);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page
     .locator(".solo-tabs")
     .getByRole("button", { name: /^自定义 5–100/ })

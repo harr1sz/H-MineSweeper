@@ -8,7 +8,7 @@ test("ISSUE-007 oversized desktop boards keep both horizontal edges reachable", 
   // Report: .gstack/qa-reports/qa-report-desktop-2026-07-31.md
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
 
   await page
     .locator(".solo-tabs")

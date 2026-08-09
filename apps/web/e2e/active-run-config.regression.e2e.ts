@@ -4,7 +4,7 @@ test("ISSUE-006 active runs cannot be silently replaced by config changes", asyn
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByRole("button", { name: "开始游戏" }).click();
 
   const board = page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ });

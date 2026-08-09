@@ -11,9 +11,9 @@ const FIXED_SEED = `solo-v1-${FIXED_NOW.toString(36)}-${Array.from(
 async function enterSoloSetup(page: Page): Promise<void> {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "开始单人游戏" }),
+    page.getByRole("button", { name: "开始游戏" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
 }
 
@@ -224,7 +224,6 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
     .locator(".solo-tabs")
     .getByRole("button", { name: /^高级 30×16/ });
   await expert.click();
-  await page.getByText("高级设置", { exact: true }).click();
   await page
     .getByRole("group", { name: "对局数据详细程度" })
     .getByRole("button", { name: "详细" })
@@ -248,7 +247,6 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
   await expect(expert).toHaveClass(/is-active/);
-  await page.getByText("高级设置", { exact: true }).click();
   await expect(
     page
       .getByRole("group", { name: "对局数据详细程度" })

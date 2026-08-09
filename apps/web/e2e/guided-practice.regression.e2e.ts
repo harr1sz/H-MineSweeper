@@ -136,7 +136,7 @@ async function useDeterministicPracticeEnvironment(
 async function enterClassicGuidedPractice(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
   await page.getByRole("button", { name: "引导练习" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveAttribute(
@@ -339,7 +339,7 @@ test("guided practice stays fully localized through setup, coaching, result, his
   await page.goto("/");
   await page.getByRole("button", { name: "切换到英文" }).click();
   await expect(page.getByRole("button", { name: "Guided practice" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Set up a solo game" }).click();
+  await page.getByRole("button", { name: "Start game" }).click();
   await expect(page.getByRole("heading", { name: "Set up a solo game" })).toBeVisible();
   await page.getByRole("button", { name: "Guided practice" }).click();
   await expect(page.getByRole("button", { name: "Guided practice" })).toHaveAttribute(
@@ -416,7 +416,7 @@ test("guided practice stays score-isolated and saves a verified practice replay"
 
   await page.goto("/");
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("heading", { name: "开始新游戏" })).toBeVisible();
   await page.getByRole("button", { name: "引导练习" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveAttribute(
@@ -543,7 +543,7 @@ test("a practice terminal leaves existing standard history, PB, and trend input 
     }));
   });
 
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page.locator(".solo-setup-section")
     .filter({ hasText: "棋盘类型" })
     .getByRole("button", { name: "经典模式" })
@@ -561,7 +561,7 @@ test("a practice terminal leaves existing standard history, PB, and trend input 
 
   await page.getByRole("button", { name: "返回首页" }).click();
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "重新设置" }).click();
+  await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("button", { name: "引导练习" }).click();
   await page.locator(".solo-setup-section")
     .filter({ hasText: "棋盘类型" })

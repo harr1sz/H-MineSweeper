@@ -83,7 +83,7 @@ function neutralFlagTarget(accepted: readonly number[]): number {
 
 async function enterClassicSolo(page: Page): Promise<void> {
   await page.goto("/");
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByRole("button", { name: "经典模式" }).click();
   await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("heading", { name: "扫雷" })).toBeVisible();

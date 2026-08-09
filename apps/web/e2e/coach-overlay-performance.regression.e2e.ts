@@ -45,7 +45,7 @@ test("100×100 教练覆盖层保持 4ms 预算且空闲倒计时不触发重绘
   await useDeterministicEnvironment(page);
   await page.goto("/");
   await expect(page.getByRole("button", { name: "引导练习" })).toHaveCount(0);
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByRole("button", { name: "引导练习" }).click();
   await page.getByRole("button", { name: "经典模式" }).click();
   await page.locator(".solo-tabs").getByRole("button", { name: /^自定义 5–100/u }).click();

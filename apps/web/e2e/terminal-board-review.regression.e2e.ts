@@ -44,7 +44,7 @@ test("ISSUE-003 terminal result can review the board and reopen summary", async 
     { now: FIXED_NOW, randomWord: FIXED_RANDOM_WORD },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "开始单人游戏" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await page.getByRole("button", { name: "开始游戏" }).click();
 
   const generated = createBoard({

@@ -2735,49 +2735,54 @@ export function SoloGame({
               </button>
             </div>
 
-            <details className="solo-setup-advanced" open={preset === "custom" ? true : undefined}>
-              <summary>{t("solo.advancedSettings")}</summary>
-              <div className="solo-custom-grid">
-                <label>
-                  <span>{t("solo.width")}</span>
-                  <input
-                    aria-label={t("solo.customWidth")}
-                    inputMode="numeric"
-                    max="100"
-                    min="5"
-                    type="number"
-                    value={draftWidth}
-                    onChange={(event) => setDraftWidth(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>{t("solo.height")}</span>
-                  <input
-                    aria-label={t("solo.customHeight")}
-                    inputMode="numeric"
-                    max="100"
-                    min="5"
-                    type="number"
-                    value={draftHeight}
-                    onChange={(event) => setDraftHeight(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>{t("solo.mines")}</span>
-                  <input
-                    aria-label={t("solo.customMines")}
-                    inputMode="numeric"
-                    min="1"
-                    type="number"
-                    value={draftMines}
-                    onChange={(event) => setDraftMines(event.target.value)}
-                  />
-                </label>
-                <button className="secondary-button" type="button" onClick={applyCustom}>
-                  {t("solo.validateCustom")}
-                </button>
+            {preset === "custom" && (
+              <div
+                className="solo-custom-settings"
+                role="group"
+                aria-label={t("solo.customSettings")}
+              >
+                <div className="solo-custom-grid">
+                  <label>
+                    <span>{t("solo.width")}</span>
+                    <input
+                      aria-label={t("solo.customWidth")}
+                      inputMode="numeric"
+                      max="100"
+                      min="5"
+                      type="number"
+                      value={draftWidth}
+                      onChange={(event) => setDraftWidth(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("solo.height")}</span>
+                    <input
+                      aria-label={t("solo.customHeight")}
+                      inputMode="numeric"
+                      max="100"
+                      min="5"
+                      type="number"
+                      value={draftHeight}
+                      onChange={(event) => setDraftHeight(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("solo.mines")}</span>
+                    <input
+                      aria-label={t("solo.customMines")}
+                      inputMode="numeric"
+                      min="1"
+                      type="number"
+                      value={draftMines}
+                      onChange={(event) => setDraftMines(event.target.value)}
+                    />
+                  </label>
+                  <button className="secondary-button" type="button" onClick={applyCustom}>
+                    {t("solo.validateCustom")}
+                  </button>
+                </div>
               </div>
-            </details>
+            )}
           </div>
 
           <div className="solo-setup-section">
