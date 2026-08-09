@@ -617,9 +617,9 @@ export function SoloHistory({
                     </small>
                   </div>
                   <b>{formatTime(record.metrics.elapsedMs)}</b>
-                  <span>3BV/s {formatMetric(completionMetrics.threeBvPerSecond)}</span>
+                  <span>{t("solo.clearSpeed")} {formatMetric(completionMetrics.threeBvPerSecond)}</span>
                   <span>
-                    IOE{" "}
+                    {t("solo.efficiency")}{" "}
                     {completionMetrics.ioe === null
                       ? "—"
                       : `${(completionMetrics.ioe * 100).toFixed(1)}%`}

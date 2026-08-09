@@ -568,7 +568,7 @@ export class TelemetryClient {
       sessionStorage ??= globalThis.sessionStorage;
     } catch {
       this.#error =
-        "浏览器无法提供遥测所需的本地删除凭据；遥测保持关闭，游戏仍可使用。";
+        "当前浏览器无法安全保存删除服务器数据所需的凭据，因此使用数据分享保持关闭。游戏仍可使用。";
     }
     this.#storage = storage;
     this.#sessionStorage = sessionStorage;
@@ -599,7 +599,7 @@ export class TelemetryClient {
       options.storage === undefined
     ) {
       this.#error =
-        "浏览器不支持安全的跨标签页遥测协调；遥测保持关闭，游戏和本地历史不受影响。";
+        "当前浏览器无法在多个标签页之间安全同步数据分享设置，因此使用数据分享保持关闭。游戏和本机成绩不受影响。";
     }
 
     if (!this.#enabledByDeployment || this.#error) return;
@@ -611,7 +611,7 @@ export class TelemetryClient {
       this.#identity = parseIdentity(storedIdentity);
       if (storedIdentity && !this.#identity) {
         this.#error =
-          "本地遥测删除凭据损坏；已停止采集，避免产生无法由你删除的新事件。";
+          "用于删除服务器数据的本机凭据已损坏。使用数据分享已经关闭，以免产生无法删除的新记录。";
         return;
       }
       const storedDeletionState =
@@ -625,7 +625,7 @@ export class TelemetryClient {
             this.#identity.pseudonymousInstallId)
       ) {
         this.#error =
-          "本地遥测删除同步标记损坏；已停止采集，避免重新上传已删除的数据。";
+          "本机保存的数据删除状态已损坏。使用数据分享已经关闭，以免重新上传已删除的内容。";
         return;
       }
       const storedQueue = parseQueue(
@@ -640,7 +640,7 @@ export class TelemetryClient {
         this.#sessionStorage?.removeItem(TAB_QUEUE_KEY);
       } else if (this.#queueDeletionEpoch > currentDeletionEpoch) {
         this.#error =
-          "本地遥测队列版本异常；已停止采集，避免重新上传已删除的数据。";
+          "待发送数据的版本无法识别。使用数据分享已经关闭，以免重新上传已删除的内容。";
         this.#queue = [];
         return;
       } else if (this.#queue.length === 0) {
@@ -668,7 +668,7 @@ export class TelemetryClient {
       if (compatibleQueue.length !== this.#queue.length) {
         this.#queue = compatibleQueue;
         this.#uploadWarning =
-          "已丢弃与当前版本、同意契约或保留期不兼容的旧遥测队列。";
+          "旧版本留下的待发送数据已经清除，因为它不符合当前的数据选择或保留时间。";
         this.persistQueue();
       }
       this.#visitSession = parseVisitSession(
@@ -679,7 +679,7 @@ export class TelemetryClient {
       }
     } catch {
       this.#error =
-        "浏览器无法提供遥测所需的本地删除凭据；遥测保持关闭，游戏仍可使用。";
+        "当前浏览器无法安全保存删除服务器数据所需的凭据，因此使用数据分享保持关闭。游戏仍可使用。";
     }
   }
 
@@ -730,7 +730,7 @@ export class TelemetryClient {
       }
     } catch {
       this.#error =
-        "无法保存遥测选择；遥测保持关闭，游戏和本地历史不受影响。";
+        "无法保存你的数据分享选择，因此使用数据分享保持关闭。游戏和本机成绩不受影响。";
       this.#consent = null;
       this.#queue = [];
     }
@@ -845,7 +845,7 @@ export class TelemetryClient {
       return true;
     } catch {
       this.#error =
-        "遥测队列无法安全保存；已停止新事件，游戏和本地历史不受影响。";
+        "待发送的使用数据无法安全保存，因此已经停止收集新数据。游戏和本机成绩不受影响。";
       return false;
     }
   }
@@ -984,7 +984,7 @@ export class TelemetryClient {
             typeof acknowledgement.deletedBefore === "string"));
       if (!validAcknowledgement) {
         this.#uploadWarning =
-          "服务端遥测确认不完整；待发送事件已保留，游戏和本地历史不受影响。";
+          "服务器没有完整确认已收到数据，待发送内容会继续保留。游戏和本机成绩不受影响。";
         return false;
       }
       if (!isRecord(acknowledgement)) return false;
@@ -1022,7 +1022,7 @@ export class TelemetryClient {
     this.refreshPersistedIdentity();
     const identity = this.#identity ?? this.ensureIdentity();
     if (!identity || !this.#fetch) {
-      throw new Error("当前设备还没有可删除的服务端原始遥测。");
+      throw new Error("这台设备目前没有可以从服务器删除的原始使用数据。");
     }
     const send = async (): Promise<Response | null> => {
       if (!(await this.ensureTelemetrySession())) return null;
@@ -1052,10 +1052,10 @@ export class TelemetryClient {
       }
     }
     if (!response) {
-      throw new Error("服务端原始遥测删除请求失败，请稍后重试。");
+      throw new Error("服务器上的使用数据暂时无法删除，请稍后重试。");
     }
     if (!response.ok) {
-      throw new Error("服务端原始遥测删除请求失败，请稍后重试。");
+      throw new Error("服务器上的使用数据暂时无法删除，请稍后重试。");
     }
     const result: unknown = await response.json();
     if (
@@ -1067,7 +1067,7 @@ export class TelemetryClient {
       typeof result.deletedBefore !== "string" ||
       !Number.isFinite(Date.parse(result.deletedBefore))
     ) {
-      throw new Error("服务端未确认删除请求，请稍后重试。");
+      throw new Error("服务器没有确认删除完成，请稍后重试。");
     }
     const deletionState: TelemetryDeletionStateV1 = {
       schemaVersion: 1,
@@ -1135,7 +1135,7 @@ export class TelemetryClient {
         this.#consent = null;
         this.clearOwnedQueue();
         this.#error =
-          "本地遥测选择已损坏；已停止采集并清除待发送事件。游戏和本地历史不受影响。";
+          "这台设备上保存的数据分享选择已损坏。使用数据分享已经关闭，待发送内容也已清空。游戏和本机成绩不受影响。";
         return;
       }
       const unchanged =
@@ -1159,7 +1159,7 @@ export class TelemetryClient {
       this.#consent = null;
       this.clearOwnedQueue();
       this.#error =
-        "无法同步遥测选择；已停止采集并清除待发送事件。游戏和本地历史不受影响。";
+        "无法同步数据分享选择。使用数据分享已经关闭，待发送内容也已清空。游戏和本机成绩不受影响。";
     }
   }
 
@@ -1172,7 +1172,7 @@ export class TelemetryClient {
       if (stored !== null && !next) {
         this.clearOwnedQueue();
         this.#error =
-          "本地遥测删除同步标记损坏；已停止采集，避免重新上传已删除的数据。";
+          "本机保存的数据删除状态已损坏。使用数据分享已经关闭，以免重新上传已删除的内容。";
         return;
       }
       if (!next) return;
@@ -1182,7 +1182,7 @@ export class TelemetryClient {
       ) {
         this.clearOwnedQueue();
         this.#error =
-          "本地遥测删除同步标记与删除凭据不一致；已停止采集。";
+          "本机保存的数据删除状态前后不一致，使用数据分享已经关闭。";
         return;
       }
       if (
@@ -1194,7 +1194,7 @@ export class TelemetryClient {
       ) {
         this.clearOwnedQueue();
         this.#error =
-          "本地遥测删除同步标记发生回退；已停止采集，避免重新上传已删除的数据。";
+          "本机保存的数据删除状态出现异常。使用数据分享已经关闭，以免重新上传已删除的内容。";
         return;
       }
       if (
@@ -1209,7 +1209,7 @@ export class TelemetryClient {
     } catch {
       this.clearOwnedQueue();
       this.#error =
-        "无法同步遥测删除状态；已停止采集，避免重新上传已删除的数据。";
+        "无法同步数据删除状态。使用数据分享已经关闭，以免重新上传已删除的内容。";
     }
   }
 
@@ -1262,7 +1262,7 @@ export class TelemetryClient {
     } catch {
       this.clearOwnedQueue();
       this.#error =
-        "服务端数据已删除，但本地删除同步标记无法保存；已停止遥测，游戏和本地历史不受影响。";
+        "服务器上的数据已经删除，但这台设备无法保存删除状态。使用数据分享已经关闭，游戏和本机成绩不受影响。";
       return next;
     }
   }
@@ -1275,14 +1275,14 @@ export class TelemetryClient {
       if (storedRaw && !stored) {
         this.clearOwnedQueue();
         this.#error =
-          "本地遥测删除凭据损坏；已停止采集，避免产生无法删除的新事件。";
+          "用于删除服务器数据的本机凭据已损坏。使用数据分享已经关闭，以免产生无法删除的新记录。";
         return;
       }
       if (!stored) {
         if (this.#identity) {
           this.clearOwnedQueue();
           this.#error =
-            "本地遥测删除凭据已被移除；已停止采集，避免产生无法删除的新事件。";
+            "用于删除服务器数据的本机凭据已经丢失。使用数据分享已经关闭，以免产生无法删除的新记录。";
         }
         return;
       }
@@ -1293,14 +1293,14 @@ export class TelemetryClient {
       ) {
         this.clearOwnedQueue();
         this.#error =
-          "本地遥测删除状态与删除凭据不一致；已停止采集。";
+          "本机保存的数据删除状态和删除凭据不一致，使用数据分享已经关闭。";
         return;
       }
       this.#identity = stored;
     } catch {
       this.clearOwnedQueue();
       this.#error =
-        "无法同步本地遥测删除凭据；已停止采集，游戏和本地历史不受影响。";
+        "无法同步用于删除服务器数据的本机凭据。使用数据分享已经关闭，游戏和本机成绩不受影响。";
     }
   }
 

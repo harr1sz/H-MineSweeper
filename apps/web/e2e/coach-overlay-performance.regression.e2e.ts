@@ -52,7 +52,7 @@ test("100×100 教练覆盖层保持 4ms 预算且空闲倒计时不触发重绘
   await page.getByLabel("自定义宽度").fill("100");
   await page.getByLabel("自定义高度").fill("100");
   await page.getByLabel("自定义雷数").fill("999");
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("grid", { name: /^100 乘 100 扫雷棋盘/u })).toBeVisible();
 
   await clickBoardCell(page, FIRST_INDEX);

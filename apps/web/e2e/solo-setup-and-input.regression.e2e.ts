@@ -40,7 +40,7 @@ async function openSoloSetup(page: Page): Promise<void> {
   await page.goto("/");
   await page.getByRole("button", { name: "开始单人游戏" }).click();
   await expect(
-    page.getByRole("heading", { name: "配置单人对局" }),
+    page.getByRole("heading", { name: "开始新游戏" }),
   ).toBeVisible();
 }
 
@@ -61,13 +61,13 @@ test("solo uses a configuration gateway before rendering the board", async ({
   await page.getByRole("button", { name: /高级 30×16/ }).click();
   await page.getByRole("button", { name: "无猜模式" }).click();
   await page.getByText("高级设置", { exact: true }).click();
-  await page.getByRole("button", { name: "详细数据" }).click();
+  await page.getByRole("button", { name: "详细" }).click();
   await page.getByRole("button", { name: "经典", exact: true }).click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
 
   await expect(page.locator('canvas[role="grid"]')).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "配置单人对局" }),
+    page.getByRole("heading", { name: "开始新游戏" }),
   ).toHaveCount(0);
   await expect(page.getByText("高级 · 30×16 / 99 · 无猜模式")).toBeVisible();
   await expect(page.getByText(/双击或中键快速展开/)).toBeVisible();
@@ -80,8 +80,8 @@ test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", as
 }) => {
   await openSoloSetup(page);
   await page.getByText("高级设置", { exact: true }).click();
-  await page.getByRole("button", { name: "详细数据" }).click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "详细" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
 
   const width = 9;
   const height = 9;
@@ -195,6 +195,6 @@ test("flag, reveal, double-click chord, and mine hit keep page scroll fixed", as
   );
   expect(mineIndex).toBeGreaterThanOrEqual(0);
   await board.click({ position: cellPosition(mineIndex, width, canvasWidth) });
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 });

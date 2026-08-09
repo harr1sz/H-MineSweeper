@@ -45,7 +45,7 @@ test("ISSUE-003 terminal result can review the board and reopen summary", async 
   );
   await page.goto("/");
   await page.getByRole("button", { name: "开始单人游戏" }).click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
 
   const generated = createBoard({
     width: 9,
@@ -59,10 +59,10 @@ test("ISSUE-003 terminal result can review the board and reopen summary", async 
   await clickBoardCell(page, 40);
   await clickBoardCell(page, mineIndex);
 
-  await expect(page.getByRole("heading", { name: "触雷" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
   await expect(page.locator(".result-overlay")).toHaveCount(0);
   await expect(
     page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ }),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "分析本局" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "复盘本局" })).toBeVisible();
 });

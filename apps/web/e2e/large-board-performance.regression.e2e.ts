@@ -16,7 +16,7 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   await page.getByLabel("自定义宽度").fill("100");
   await page.getByLabel("自定义高度").fill("100");
   await page.getByLabel("自定义雷数").fill("999");
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(
     page.getByRole("grid", { name: /^100 乘 100 扫雷棋盘/ }),
   ).toBeVisible();
@@ -27,12 +27,12 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   });
   const themes = ["经典", "高对比", "暖色深色"];
   for (const [index, theme] of themes.entries()) {
-    await page.getByRole("button", { name: "更改配置" }).click();
+    await page.getByRole("button", { name: "游戏设置" }).click();
     await page
       .getByRole("group", { name: "棋盘显示方案" })
       .getByRole("button", { name: theme })
       .click();
-    await page.getByRole("button", { name: "开始对局" }).click();
+    await page.getByRole("button", { name: "开始游戏" }).click();
     await expect
       .poll(() =>
         page.evaluate(

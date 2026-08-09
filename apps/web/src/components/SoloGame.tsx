@@ -2974,9 +2974,9 @@ export function SoloGame({
               ) : (
                 <div className="solo-result-metrics">
                   <span>{t(isNewPersonalBest ? "solo.newPersonalBestLocal" : "solo.localUnverified")}</span>
-                  <b>3BV {board3BV ?? "—"}</b>
-                  <b>3BV/s {formatMetric(threeBvPerSecond)}</b>
-                  <b>IOE {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
+                  <b>{t("solo.boardComplexity")} {board3BV ?? "—"}</b>
+                  <b>{t("solo.clearSpeed")} {formatMetric(threeBvPerSecond)}</b>
+                  <b>{t("solo.efficiency")} {ioe === null ? "—" : `${(ioe * 100).toFixed(1)}%`}</b>
                   {status === "LOST" && <small>{t("solo.completionMetricUnavailable")}</small>}
                 </div>
               )}
@@ -3066,17 +3066,17 @@ export function SoloGame({
           {sessionKind === "STANDARD" && statsLevel !== "basic" && (
             <div className="solo-stats solo-stats-advanced">
               <div title={t("solo.board3bvHelp")}>
-                <span>3BV</span>
+                <span>{t("solo.boardComplexity")}</span>
                 <strong>{board3BV ?? "—"}</strong>
               </div>
               <div title={t("solo.metricHelp")}>
-                <span>3BV/s</span>
+                <span>{t("solo.clearSpeed")}</span>
                 <strong>{metricView.completionState === "PENDING"
                   ? t("solo.completionMetricPending")
                   : formatMetric(threeBvPerSecond)}</strong>
               </div>
               <div title={t("solo.metricHelp")}>
-                <span>IOE</span>
+                <span>{t("solo.efficiency")}</span>
                 <strong>
                   {metricView.completionState === "PENDING"
                     ? t("solo.completionMetricPending")

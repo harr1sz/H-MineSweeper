@@ -5,7 +5,7 @@ test("ISSUE-006 active runs cannot be silently replaced by config changes", asyn
 }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "开始单人游戏" }).click();
-  await page.getByRole("button", { name: "开始对局" }).click();
+  await page.getByRole("button", { name: "开始游戏" }).click();
 
   const board = page.getByRole("grid", { name: /^9 乘 9 扫雷棋盘/ });
   await board.scrollIntoViewIfNeeded();
@@ -17,11 +17,11 @@ test("ISSUE-006 active runs cannot be silently replaced by config changes", asyn
   await expect(page.getByText("进行中", { exact: true })).toBeVisible();
 
   await expect(
-    page.getByRole("button", { name: "结束本局并更改配置" }),
+    page.getByRole("button", { name: "结束本局并重新设置" }),
   ).toBeVisible();
-  await expect(page.getByLabel("单人开局配置")).toHaveCount(0);
+  await expect(page.getByLabel("新游戏设置")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "结束本局并更改配置" }).click();
-  await expect(page.getByLabel("单人开局配置")).toBeVisible();
+  await page.getByRole("button", { name: "结束本局并重新设置" }).click();
+  await expect(page.getByLabel("新游戏设置")).toBeVisible();
   await expect(page.getByRole("button", { name: /^中级 16×16/ })).toBeEnabled();
 });

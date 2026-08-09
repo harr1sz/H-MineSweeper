@@ -79,7 +79,7 @@ describe("locale contract", () => {
       "初级 / 中级 / 高级 / 自定义",
     );
     expect(translate("zh-CN", "home.solo.detail2")).toBe("经典随机 / 无猜");
-    expect(translate("zh-CN", "home.solo.detail3")).toBe("标准对局 / 引导练习");
+    expect(translate("zh-CN", "home.solo.detail3")).toBe("普通游戏 / 引导练习");
   });
 
   it("does not use em dashes, en dashes, or Chinese sentence punctuation in English messages", () => {

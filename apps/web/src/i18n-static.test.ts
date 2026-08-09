@@ -102,8 +102,10 @@ describe("localized UI source", () => {
 
   it("keeps the no-JavaScript document metadata aligned with the Chinese default", () => {
     const html = readFileSync(join(SOURCE_ROOT, "..", "index.html"), "utf8");
-    expect(html).toContain("本地单人扫雷训练、可验证复盘与引导练习。");
-    expect(html).toContain("H‑MineSweeper · 专业单人训练 Alpha");
+    expect(html).toContain(
+      "单人扫雷、赛后复盘和针对性练习，成绩保存在你的设备上。",
+    );
+    expect(html).toContain("H‑MineSweeper · 单人扫雷训练 Alpha");
     expect(html).not.toMatch(/Build a memory|Professional Solo|deterministic review/iu);
   });
 });

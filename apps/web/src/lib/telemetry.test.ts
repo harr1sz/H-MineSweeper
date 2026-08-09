@@ -170,7 +170,7 @@ describe("TelemetryClient", () => {
     await expect(client.flush()).resolves.toBe(false);
     expect(client.snapshot()).toMatchObject({
       queuedEvents: 1,
-      error: expect.stringMatching(/确认不完整/),
+      error: expect.stringMatching(/没有完整确认/),
     });
 
     validAcknowledgement = true;
@@ -297,7 +297,7 @@ describe("TelemetryClient", () => {
     });
     expect(newClient.snapshot()).toMatchObject({
       queuedEvents: 0,
-      error: expect.stringMatching(/不兼容的旧遥测队列/),
+      error: expect.stringMatching(/旧版本留下的待发送数据/),
     });
     expect(
       newClient.track("mode_selected", { mode: "solo" }),
