@@ -351,7 +351,7 @@ test("终局历史可刷新恢复、筛选、导出并明确删除", async ({ pa
   await expect(page.locator(".solo-history-list article")).toHaveCount(0);
 });
 
-test("普通游戏结束后可以立即重玩完全相同的棋盘", async ({ page }) => {
+test("普通游戏重玩本图时保留雷位并等待新的首击", async ({ page }) => {
   await useDeterministicSoloSeed(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await enterSolo(page);
@@ -368,16 +368,20 @@ test("普通游戏结束后可以立即重玩完全相同的棋盘", async ({ pa
   await clickBoardCell(page, 40, 9, 9);
   await clickBoardCell(page, mineIndex, 9, 9);
   await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "回到踩雷前一步", exact: true }),
+  ).toHaveCount(0);
   const firstBoardHash = await page.locator(".solo-proof code").textContent();
 
   await page.getByRole("button", { name: "重玩本图", exact: true }).click();
-  await expect(page.getByText("进行中", { exact: true })).toBeVisible();
-  await expect(page.getByText("已按原来的雷位重开本图，计时重新开始。")).toBeVisible();
-  await expect(page.locator(".solo-proof code")).toHaveText(firstBoardHash ?? "");
+  await expect(page.getByText("等待首击", { exact: true })).toBeVisible();
+  await expect(page.locator(".solo-clock")).toHaveText("00:00.00");
+  await expect(page.getByText("雷位没有变化，点击任意格重新开始。")).toBeVisible();
   await expect(page.getByRole("heading", { name: "踩雷了" })).toHaveCount(0);
 
   await clickBoardCell(page, mineIndex, 9, 9);
   await expect(page.getByRole("heading", { name: "踩雷了" })).toBeVisible();
+  await expect(page.locator(".solo-proof code")).toHaveText(firstBoardHash ?? "");
 });
 
 test("新终局可打开已验证复盘并逐步浏览", async ({ page }) => {

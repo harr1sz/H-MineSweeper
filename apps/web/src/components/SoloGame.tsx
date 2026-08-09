@@ -511,6 +511,7 @@ export function SoloGame({
   const initialFlagsRef = useRef<readonly number[]>([]);
   const initialQuestionsRef = useRef<readonly number[]>([]);
   const boardSpecRef = useRef<BoardSpec | null>(null);
+  const pendingReplaySpecRef = useRef<BoardSpec | null>(null);
   const historyStoreRef = useRef(createIndexedDbSoloHistoryStore());
   const practiceHistoryStoreRef = useRef(createIndexedDbPracticeHistoryStore());
   const runIdentityRef = useRef<SoloRunIdentity | null>(null);
@@ -833,6 +834,7 @@ export function SoloGame({
       initialFlagsRef.current = [];
       initialQuestionsRef.current = [];
       boardSpecRef.current = null;
+      pendingReplaySpecRef.current = null;
       runIdentityRef.current = null;
       runCompletedAtRef.current = null;
       historyEnqueuedRunRef.current = "";
@@ -1371,6 +1373,20 @@ export function SoloGame({
           (visibility, index) =>
             visibility === CELL_FLAGGED ? index : -1,
         ).filter((index) => index >= 0);
+        const pendingReplaySpec = pendingReplaySpecRef.current;
+        if (pendingReplaySpec !== null) {
+          pendingReplaySpecRef.current = null;
+          const outcome = beginGame(
+            pendingReplaySpec,
+            cellIndex,
+            flaggedIndexes,
+            { physicalClicks },
+          );
+          if (outcome === "PLAYING") {
+            setNotice({ id: "solo.sameBoardPlaying" });
+          }
+          return;
+        }
         if (config.mode === "no_guess") {
           generateNoGuess(cellIndex, flaggedIndexes, physicalClicks);
           return;
@@ -2157,7 +2173,8 @@ export function SoloGame({
     }
     const replaySpec = Object.freeze({ ...currentSpec });
     resetBoard(config, preset, "STANDARD");
-    beginGame(replaySpec, replaySpec.startIndex, []);
+    pendingReplaySpecRef.current = replaySpec;
+    replaceGame(createGameState(createBoard(replaySpec)));
     setNotice({ id: "solo.sameBoardStarted" });
   };
 
