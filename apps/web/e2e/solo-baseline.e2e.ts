@@ -232,7 +232,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
 
   await page
     .getByRole("group", { name: "棋盘显示方案" })
-    .getByRole("button", { name: "高对比" })
+    .getByRole("button", { name: "象牙战术" })
     .click();
   await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(page.getByRole("heading", { name: "扫雷" })).toBeVisible();
@@ -257,7 +257,7 @@ test("刷新后恢复本地单人偏好", async ({ page }) => {
   await expect(
     page
       .getByRole("group", { name: "棋盘显示方案" })
-      .getByRole("button", { name: "高对比" }),
+      .getByRole("button", { name: "象牙战术" }),
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "开始游戏" }).click();
   await expect(

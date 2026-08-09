@@ -16,7 +16,7 @@ const PREFERENCES: SoloPreferencesV1 = {
     mode: "no_guess",
   },
   statsLevel: "analysis",
-  boardTheme: "high-contrast",
+  boardTheme: "ivory-tactical",
 };
 
 describe("solo preferences", () => {

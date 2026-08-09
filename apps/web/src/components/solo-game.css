@@ -466,6 +466,10 @@
   grid-template-columns: repeat(3, 1fr);
 }
 
+.solo-theme-tabs {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .solo-compact-tabs button {
   min-height: 44px;
   border: 1px solid #303137;
@@ -483,6 +487,14 @@
 
 .solo-compact-tabs button + button {
   border-left: 0;
+}
+
+.solo-theme-tabs button:nth-child(odd) {
+  border-left-width: 1px;
+}
+
+.solo-theme-tabs button:nth-child(n + 3) {
+  border-top-width: 0;
 }
 
 .solo-compact-tabs button:hover,

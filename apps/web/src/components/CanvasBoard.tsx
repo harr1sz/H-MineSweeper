@@ -15,7 +15,11 @@ import type { CoachAction } from "../lib/practice-coach";
 
 export type BoardAction = "REVEAL" | "TOGGLE_FLAG" | "CHORD";
 
-export type BoardTheme = "classic" | "black-gold" | "high-contrast";
+export type BoardTheme =
+  | "classic"
+  | "black-gold"
+  | "high-contrast"
+  | "ivory-tactical";
 export type BoardEffectsProfile = "full" | "lite" | "essential";
 
 export interface BoardInputMeta {
@@ -67,12 +71,14 @@ export interface BoardPalette {
   readonly hiddenB: string;
   readonly revealedLine: string;
   readonly hiddenLine: string;
-  readonly revealedHighlight: string;
+  readonly revealedHighlight: string | null;
   readonly hiddenHighlight: string;
+  readonly revealedInset: number;
   readonly flag: string;
   readonly mine: string;
   readonly mineCore: string;
-  readonly numberStroke: string;
+  readonly numberFontFamily: string;
+  readonly numberFontWeight: number;
   readonly focus: string;
   readonly focusGuard: string;
   readonly numberColors: readonly string[];
@@ -125,12 +131,14 @@ const PALETTES: Readonly<Record<BoardTheme, BoardPalette>> = {
     hiddenB: "#111b27",
     revealedLine: "#71869b",
     hiddenLine: "#30465d",
-    revealedHighlight: "#71869b",
+    revealedHighlight: null,
     hiddenHighlight: "#51677d",
+    revealedInset: 1,
     flag: "#ffd36f",
     mine: "#ff6f82",
     mineCore: "#141820",
-    numberStroke: "#070b11",
+    numberFontFamily: '"JetBrains Mono", "SFMono-Regular", monospace',
+    numberFontWeight: 750,
     focus: "#f7c66a",
     focusGuard: "#090c11",
     numberColors: [
@@ -155,12 +163,14 @@ const PALETTES: Readonly<Record<BoardTheme, BoardPalette>> = {
     hiddenB: "#101319",
     revealedLine: "#7b8490",
     hiddenLine: "#343b46",
-    revealedHighlight: "#7b8490",
+    revealedHighlight: null,
     hiddenHighlight: "#4c535e",
+    revealedInset: 1,
     flag: "#ffd466",
     mine: "#ff6679",
     mineCore: "#11151c",
-    numberStroke: "#060709",
+    numberFontFamily: '"JetBrains Mono", "SFMono-Regular", monospace',
+    numberFontWeight: 750,
     focus: "#ffd989",
     focusGuard: "#08080a",
     numberColors: [
@@ -185,12 +195,14 @@ const PALETTES: Readonly<Record<BoardTheme, BoardPalette>> = {
     hiddenB: "#090c10",
     revealedLine: "#b0b8c2",
     hiddenLine: "#626b78",
-    revealedHighlight: "#b0b8c2",
+    revealedHighlight: null,
     hiddenHighlight: "#8a929d",
+    revealedInset: 1,
     flag: "#ffe08a",
     mine: "#ff7485",
     mineCore: "#050608",
-    numberStroke: "#000000",
+    numberFontFamily: '"JetBrains Mono", "SFMono-Regular", monospace',
+    numberFontWeight: 750,
     focus: "#ffe7a8",
     focusGuard: "#000000",
     numberColors: [
@@ -203,6 +215,38 @@ const PALETTES: Readonly<Record<BoardTheme, BoardPalette>> = {
       "#87e8f3",
       "#f2b4ff",
       "#ffffff",
+    ],
+  },
+  "ivory-tactical": {
+    canvas: "#0d0c0a",
+    revealed: "#d7cfbf",
+    flagged: "#5c441d",
+    mineCell: "#7b2d35",
+    pressed: "#5e5446",
+    hiddenA: "#181614",
+    hiddenB: "#12110f",
+    revealedLine: "#b8ad9b",
+    hiddenLine: "#443d32",
+    revealedHighlight: null,
+    hiddenHighlight: "#5a5142",
+    revealedInset: 0,
+    flag: "#d09b2e",
+    mine: "#ef6872",
+    mineCore: "#201713",
+    numberFontFamily: 'Arial, "Helvetica Neue", sans-serif',
+    numberFontWeight: 750,
+    focus: "#d79e2d",
+    focusGuard: "#2a2112",
+    numberColors: [
+      "",
+      "#24598d",
+      "#176547",
+      "#a53b3e",
+      "#5f478d",
+      "#8b551e",
+      "#0f6871",
+      "#4b3f60",
+      "#292724",
     ],
   },
 };
@@ -233,6 +277,20 @@ export function resolveBoardMarkMetrics(cellSize: number): BoardMarkMetrics {
     iconSize: Math.max(14, safeCellSize * 0.74),
     iconLineWidth: Math.max(1.5, safeCellSize * 0.075),
   };
+}
+
+export function drawBoardNumber(
+  context: CanvasRenderingContext2D,
+  value: number,
+  centerX: number,
+  centerY: number,
+  palette: BoardPalette,
+): void {
+  context.fillStyle =
+    palette.numberColors[value] ??
+    palette.numberColors[8] ??
+    "#f0ede6";
+  context.fillText(String(value), centerX, centerY);
 }
 
 export function resolveBoardAvailableWidth(
@@ -969,7 +1027,7 @@ export function CanvasBoard({
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.font = `900 ${markMetrics.numberFontSize}px "JetBrains Mono", "SFMono-Regular", monospace`;
+    context.font = `${palette.numberFontWeight} ${markMetrics.numberFontSize}px ${palette.numberFontFamily}`;
     context.lineJoin = "round";
 
     const resolveVisibility = (
@@ -1019,7 +1077,15 @@ export function CanvasBoard({
             ? palette.hiddenA
             : palette.hiddenB;
         }
-        context.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+        const surfaceInset = visibility === REVEALED
+          ? palette.revealedInset
+          : 1;
+        context.fillRect(
+          x + surfaceInset,
+          y + surfaceInset,
+          cellSize - surfaceInset * 2,
+          cellSize - surfaceInset * 2,
+        );
 
         context.strokeStyle =
           visibility === REVEALED
@@ -1028,14 +1094,18 @@ export function CanvasBoard({
         context.lineWidth = 1;
         context.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
 
-        if (cellCount <= 2_500 && cellSize > MIN_CELL_SIZE) {
+        const highlightColor = visibility === REVEALED
+          ? palette.revealedHighlight
+          : palette.hiddenHighlight;
+        if (
+          highlightColor !== null &&
+          cellCount <= 2_500 &&
+          cellSize > MIN_CELL_SIZE
+        ) {
           context.beginPath();
           context.moveTo(x + 2.5, y + 2.5);
           context.lineTo(x + cellSize - 2.5, y + 2.5);
-          context.strokeStyle =
-            visibility === REVEALED
-              ? palette.revealedHighlight
-              : palette.hiddenHighlight;
+          context.strokeStyle = highlightColor;
           context.lineWidth = Math.max(1, cellSize * 0.045);
           context.stroke();
         }
@@ -1073,14 +1143,7 @@ export function CanvasBoard({
         } else {
           const value = game.board.adjacent[index] ?? 0;
           if (value > 0) {
-            context.fillStyle =
-              palette.numberColors[value] ??
-              palette.numberColors[8] ??
-              "#f0ede6";
-            context.strokeStyle = palette.numberStroke;
-            context.lineWidth = Math.max(1.4, cellSize * 0.065);
-            context.strokeText(String(value), centerX, centerY + 0.5);
-            context.fillText(String(value), centerX, centerY + 0.5);
+            drawBoardNumber(context, value, centerX, centerY, palette);
           }
         }
       }

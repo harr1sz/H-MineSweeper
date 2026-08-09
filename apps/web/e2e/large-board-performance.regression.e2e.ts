@@ -25,7 +25,7 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
     globalThis.__HMS_PERF__ = {};
     globalThis.__HMS_PERF_COUNTS__ = {};
   });
-  const themes = ["经典", "高对比", "暖色深色"];
+  const themes = ["经典", "高对比", "暖色深色", "象牙战术"];
   for (const [index, theme] of themes.entries()) {
     await page.getByRole("button", { name: "游戏设置" }).click();
     await page
@@ -45,6 +45,6 @@ test("ISSUE-008 100×100 full redraws stay inside the desktop regression budget"
   const samples = await page.evaluate(
     () => globalThis.__HMS_PERF__?.boardFullDrawSimplifiedMs ?? [],
   );
-  expect(samples).toHaveLength(3);
+  expect(samples).toHaveLength(4);
   expect(Math.max(...samples)).toBeLessThanOrEqual(8);
 });

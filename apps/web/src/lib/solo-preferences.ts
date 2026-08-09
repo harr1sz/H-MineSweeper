@@ -13,7 +13,8 @@ export type SoloStatsLevelPreference = "basic" | "advanced" | "analysis";
 export type SoloBoardThemePreference =
   | "black-gold"
   | "classic"
-  | "high-contrast";
+  | "high-contrast"
+  | "ivory-tactical";
 
 export interface SoloPreferencesV1 {
   readonly schemaVersion: typeof SOLO_PREFERENCES_SCHEMA_VERSION;
@@ -56,7 +57,8 @@ function isBoardTheme(value: unknown): value is SoloBoardThemePreference {
   return (
     value === "black-gold" ||
     value === "classic" ||
-    value === "high-contrast"
+    value === "high-contrast" ||
+    value === "ivory-tactical"
   );
 }
 

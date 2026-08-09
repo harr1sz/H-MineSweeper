@@ -2842,12 +2842,13 @@ export function SoloGame({
                   <small>{t("solo.boardDisplayHelp")}</small>
                 </div>
               </div>
-              <div className="solo-compact-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
+              <div className="solo-compact-tabs solo-theme-tabs" role="group" aria-label={t("solo.boardDisplayAria")}>
                 {(
                   [
                     ["black-gold", t("solo.comfort")],
                     ["classic", t("solo.professional")],
                     ["high-contrast", t("solo.highContrast")],
+                    ["ivory-tactical", t("solo.ivoryTactical")],
                   ] as const
                 ).map(([value, label]) => (
                   <button

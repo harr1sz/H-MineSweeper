@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  drawBoardNumber,
   drawBoardCoachOverlay,
   normalizeChangedIndexes,
   resolveBoardAvailableWidth,
@@ -38,6 +39,10 @@ function recordingContext(): {
       operations.push(`arc:${x},${y},${radius}`),
     moveTo: (x: number, y: number) => operations.push(`moveTo:${x},${y}`),
     lineTo: (x: number, y: number) => operations.push(`lineTo:${x},${y}`),
+    fillText: (value: string, x: number, y: number) =>
+      operations.push(`fillText:${value},${x},${y}`),
+    strokeText: (value: string, x: number, y: number) =>
+      operations.push(`strokeText:${value},${x},${y}`),
   } as unknown as CanvasRenderingContext2D;
   return { context, operations };
 }
@@ -82,6 +87,7 @@ describe("CanvasBoard rendering helpers", () => {
       "classic",
       "black-gold",
       "high-contrast",
+      "ivory-tactical",
     ] as const) {
       const palette = resolveBoardPalette(theme);
       expect(palette.hiddenA).not.toBe(palette.revealed);
@@ -89,7 +95,8 @@ describe("CanvasBoard rendering helpers", () => {
       expect(palette.flagged).not.toBe(palette.revealed);
       expect(palette.mineCell).not.toBe(palette.revealed);
       expect(palette.focus).not.toBe(palette.focusGuard);
-      expect(palette.numberStroke).not.toBe(palette.numberColors[1]);
+      expect(palette.numberFontFamily.length).toBeGreaterThan(0);
+      expect(palette.numberFontWeight).toBeGreaterThanOrEqual(700);
       expect(palette.numberColors).toHaveLength(9);
       expect(palette.numberColors.slice(1).every(Boolean)).toBe(true);
     }
@@ -100,11 +107,24 @@ describe("CanvasBoard rendering helpers", () => {
       "classic",
       "black-gold",
       "high-contrast",
+      "ivory-tactical",
     ] as const) {
       const palette = resolveBoardPalette(theme);
       expect(contrastRatio(palette.revealed, palette.hiddenA)).toBeGreaterThanOrEqual(2.2);
       expect(contrastRatio(palette.revealed, palette.hiddenB)).toBeGreaterThanOrEqual(2.2);
     }
+  });
+
+  it("draws clue numbers once without a softening outline", () => {
+    const { context, operations } = recordingContext();
+    drawBoardNumber(
+      context,
+      3,
+      15,
+      15,
+      resolveBoardPalette("ivory-tactical"),
+    );
+    expect(operations).toEqual(["fillText:3,15,15"]);
   });
 
   it("keeps numbers and board markers legible at the smallest cell size", () => {
